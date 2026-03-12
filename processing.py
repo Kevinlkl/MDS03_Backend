@@ -116,6 +116,6 @@ def print_first_n_metadata(folder: Path, n: int = 10) -> None:
 
 
 if __name__ == "__main__":
-    # args = parse_args()
-    # resize_dataset_images(args.input, args.output, (args.width, args.height))
+    args = parse_args()
+    resize_dataset_images(args.input, args.output, (args.width, args.height))
     print_first_n_metadata(Path("Dataset/glioma_256"), n=10)

@@ -1,4 +1,4 @@
-`import dicom2nifti
+import dicom2nifti
 import os
 import zipfile
 import shutil

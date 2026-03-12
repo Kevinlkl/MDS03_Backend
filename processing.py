@@ -62,13 +62,13 @@ def parse_args() -> argparse.Namespace:
 
     parser.add_argument(
         "--input",
-        default="Dataset\\notumor",
+        default="Dataset//Pituitary",
         help="Input dataset directory",
     )
 
     parser.add_argument(
         "--output",
-        default="Dataset\\notumor_256",
+        default="Dataset//Pituitary_256_T1weighted",
         help="Output directory for resized images",
     )
 
@@ -118,4 +118,4 @@ def print_first_n_metadata(folder: Path, n: int = 10) -> None:
 if __name__ == "__main__":
     args = parse_args()
     resize_dataset_images(args.input, args.output, (args.width, args.height))
-    print_first_n_metadata(Path("Dataset/glioma_256"), n=10)
+    print_first_n_metadata(Path("Dataset/Pituitary_256_T1weighted"), n=10)

@@ -13,19 +13,43 @@ import SimpleITK as sitk
 SUPPORTED_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.bmp', '.tiff', '.tif'}
 
 def normalize_to_uint8(slice_data: np.ndarray, p_low: float=0.5, p_high: float=99.5) -> np.ndarray:
+    """
+    Normalise the slice data to uint8 (0-255) using percentile clipping where
+    p_low and p_high define the percentiles for clipping to reduce the effect of outliers.
+
+    args:
+    slice_data: 2D numpy array of the slice
+    p_low: lower percentile for clipping (default 0.5)
+    p_high: upper percentile for clipping (default 99.5)
+
+    returns:
+    2D numpy array of type uint8 with values in range [0, 255]
+    """
+    # Replace NaN and inf values with 0 before processing
     arr = np.nan_to_num(slice_data.astype(np.float32), nan=0.0, posinf=0.0, neginf=0.0)
     brain_voxels = arr[arr > 0]
     if brain_voxels.size == 0:
         return np.zeros(arr.shape, dtype=np.uint8)
+    # Use percentiles to determine the clipping range
     lo = float(np.percentile(brain_voxels, p_low))
     hi = float(np.percentile(brain_voxels, p_high))
     if hi <= lo:
         return np.zeros(arr.shape, dtype=np.uint8)
+    # Clip and normalise to 0-255
     arr = np.clip(arr, lo, hi)
     arr = (arr - lo) / (hi - lo)
     return (arr * 255).astype(np.uint8)
 
 def apply_n4_bias_correction(volume: np.ndarray) -> np.ndarray:
+    """
+    Apply N4 bias field correction to the volume.
+
+    args:
+    volume: 3D numpy array of the brain scan
+
+    returns:
+    3D numpy array of the bias-corrected volume
+    """
     img = sitk.GetImageFromArray(volume)
     mask = sitk.OtsuThreshold(img, 0, 1, 200)
     corrector = sitk.N4BiasFieldCorrectionImageFilter()
@@ -33,6 +57,18 @@ def apply_n4_bias_correction(volume: np.ndarray) -> np.ndarray:
     return sitk.GetArrayFromImage(corrected)
 
 def save_volume_as_png_slices(volume: np.ndarray, out_dir: Path, axis: int = 2) -> int:
+    """
+    Saves a 3D volume as PNG slices along the specified axis after applying N4 
+    bias correction and normalisation.
+
+    args:
+    volume: 3D numpy array of the brain scan
+    out_dir: Path to the output directory where PNG slices will be saved
+    axis: int, the axis along which to slice the volume (0=sagittal, 1=coronal, 2=axial)
+
+    returns:
+    int: number of slices saved
+    """
     out_dir.mkdir(parents=True, exist_ok=True)
 
     if volume.ndim == 4:
@@ -41,6 +77,7 @@ def save_volume_as_png_slices(volume: np.ndarray, out_dir: Path, axis: int = 2) 
     if volume.ndim != 3:
         raise ValueError(f"Expected a 3D volume, but got shape {volume.shape}")
 
+    # Apply N4 bias correction to the entire volume before slicing
     volume = apply_n4_bias_correction(volume)
 
     volume = np.moveaxis(volume, axis, 2)
@@ -55,7 +92,9 @@ def save_volume_as_png_slices(volume: np.ndarray, out_dir: Path, axis: int = 2) 
             continue
 
         img = Image.fromarray(png_data, mode='L')
+        # Resize to 256x256 using LANCZOS resampling for better quality
         img = img.resize((256, 256), resample=Image.LANCZOS)
+        # Save with zero-padded slice index
         img.save(out_dir / f"slice_{i:03d}.png")
         saved += 1
 
@@ -70,6 +109,19 @@ def is_empty_slice(slice_data: np.ndarray, threshold: float = 5.0) -> bool:
 
 
 def convert_nifti_zip_to_png(input_dir: Path, output_dir: Path, axis: int=2) -> int:
+    """
+    Convert zipped NIfTI files to PNG slices. The function expects the input directory to contain .zip files,
+    each containing one or more NIfTI files (.nii or .nii.gz). It extracts the NIfTI files, applies N4 bias correction,
+    normalises the slices, and saves them as PNG images in an output directory that mirrors the input structure.
+
+    args: 
+    input_dir: Path to the directory containing .zip files with NIfTI files inside
+    output_dir: Path to the directory where PNG slices will be saved
+    axis: int, the axis along which to slice the volume (0=sagittal, 1=coronal, 2=axial)
+
+    returns:
+    int: total number of PNG slices saved
+    """
     input_dir = Path(input_dir)
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -90,6 +142,7 @@ def convert_nifti_zip_to_png(input_dir: Path, output_dir: Path, axis: int=2) -> 
     for zip_file in zip_files:
         try: 
             with zipfile.ZipFile(zip_file, 'r') as zf:
+                # Look for NIfTI files in the zip
                 nifti_ext = [
                     m for m in zf.namelist()
                     if m.lower().endswith(('.nii', '.nii.gz'))
@@ -99,15 +152,18 @@ def convert_nifti_zip_to_png(input_dir: Path, output_dir: Path, axis: int=2) -> 
                     print(f"No NIfTI files found in {zip_file}")
                     continue
 
+                # Extract NIfTI files to a temporary directory for processing
                 with tempfile.TemporaryDirectory() as temp:
                     tmp_dir = Path(temp)
 
+                    # Process each NIfTI file found in the zip
                     for member in nifti_ext:
                         extracted_path = Path(zf.extract(member, path=tmp_dir))
                         nii_name = extracted_path.name
                         stem = nii_name.replace('.nii.gz', '').replace('.nii', '')
 
                         case_out_dir = output_dir / zip_file.stem / stem
+                        # Load the NIfTI file and get the volume data
                         img = nib.load(str(extracted_path))
                         volume = img.get_fdata()
 
@@ -128,6 +184,9 @@ def convert_nifti_zip_to_png(input_dir: Path, output_dir: Path, axis: int=2) -> 
     print(f"Zip failed     : {failed}")                    
 
 def parse_args() -> argparse.Namespace:
+    """
+    Parse command-line arguments.
+    """
     parser = argparse.ArgumentParser(description="Convert zipped NIfTI files to PNG slices")
     parser.add_argument(
         "--input",
@@ -149,6 +208,14 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 def print_first_n_metadata(folder: Path, n: int = 10) -> None:
+    """
+    Prints metadata for the first n image files in the specified folder. Metadata 
+    includes format, mode, size, file size, and last modified date.
+
+    args:
+    folder: Path to the folder containing image files
+    n: number of files to print metadata for (default 10)
+    """
     folder = Path(folder)
     if not folder.exists() or not folder.is_dir():
         print(f"Metadata folder not found: {folder}")
@@ -180,4 +247,4 @@ if __name__ == "__main__":
     convert_nifti_zip_to_png(Path(args.input), Path(args.output), axis=args.axis)
     print("\nMetadata check:")
     print_first_n_metadata(Path("Dataset\\T1_PNG\\BraTS20_Training_001_t1.nii\\BraTS20_Training_001_t1"))
-    print_first_n_metadata(Path("Dataset\\T1_PNG\\BraTS20_Training_001_t1.nii\\BraTS20_Training_002_t1"))
+    print_first_n_metadata(Path("Dataset\\T1_PNG\\BraTS20_Training_002_t1.nii\\BraTS20_Training_002_t1"))

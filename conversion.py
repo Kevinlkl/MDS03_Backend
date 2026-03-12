@@ -33,13 +33,13 @@ def convert_dicom_to_nii(dicom_folder: str, output_folder: str):
         relative_path = os.path.relpath(root, dicom_folder)
         sub_output = os.path.join(output_folder, relative_path)
         os.makedirs(sub_output, exist_ok=True)
-            try:
+        try:
             dicom2nifti.convert_directory(root, sub_output, compression=False, reorient=True)
             print(f"✓ Converted: {root}  →  {sub_output} ({len(dicom_files)} files)")
-                converted += 1
-            except Exception as e:
+            converted += 1
+        except Exception as e:
             print(f"✗ Failed: {root} | Reason: {e}")
-                failed += 1
+            failed += 1
 
     print(f"\nDone! {converted} series converted, {failed} failed. Files saved to: {output_folder}")
 
@@ -100,8 +100,8 @@ def convert_dicom_to_png(dicom_folder: str, output_folder: str):
 
 
 if __name__ == "__main__":
-    input_folder = r" " # insert path
-    output_folder = r" " # insert path
+    input_folder = r"" # insert path inside quotes
+    output_folder = r"" # insert path inside quotes
     # Uncomment function to use
     # convert_dicom_to_nii(input_folder, output_folder)
     # convert_dicom_to_png(input_folder, output_folder)

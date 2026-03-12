@@ -1,4 +1,5 @@
 import argparse
+from datetime import datetime
 from pathlib import Path
 from typing import Iterable
 
@@ -87,6 +88,34 @@ def parse_args() -> argparse.Namespace:
 
     return parser.parse_args()
 
+def print_first_n_metadata(folder: Path, n: int = 10) -> None:
+    folder = Path(folder)
+    if not folder.exists() or not folder.is_dir():
+        print(f"Metadata folder not found: {folder}")
+        return
+
+    files = sorted(
+        [p for p in folder.iterdir() if p.is_file() and p.suffix.lower() in SUPPORTED_EXTENSIONS]
+    )[:n]
+
+    print(f"\nMetadata for first {len(files)} images in {folder}:")
+    for i, p in enumerate(files, 1):
+        try:
+            stat = p.stat()
+            with Image.open(p) as img:
+                modified = datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M:%S")
+                print(f"[{i}] {p.name}")
+                print(f"  format   : {img.format}")
+                print(f"  mode     : {img.mode}")
+                print(f"  size     : {img.size[0]}x{img.size[1]}")
+                print(f"  file size: {stat.st_size} bytes")
+                print(f"  modified : {modified}")
+                print("-" * 50)
+        except (UnidentifiedImageError, OSError) as exc:
+            print(f"[{i}] {p.name} -> cannot read metadata: {exc}")
+
+
 if __name__ == "__main__":
-    args = parse_args()
-    resize_dataset_images(args.input, args.output, (args.width, args.height))
+    # args = parse_args()
+    # resize_dataset_images(args.input, args.output, (args.width, args.height))
+    print_first_n_metadata(Path("Dataset/glioma_256"), n=10)

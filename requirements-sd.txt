@@ -2,5 +2,6 @@ diffusers>=0.30.0
 transformers>=4.42.0
 accelerate>=0.33.0
 safetensors>=0.4.3
+peft>=0.12.0
 Pillow>=10.3.0
 tqdm>=4.66.0

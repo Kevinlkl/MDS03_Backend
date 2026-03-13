@@ -6,6 +6,7 @@ from pathlib import Path
 
 import torch
 import torch.nn.functional as F
+from peft import LoraConfig
 from PIL import Image
 from torch.utils.data import DataLoader, Dataset
 from torchvision import transforms
@@ -118,17 +119,37 @@ def train(args: argparse.Namespace) -> None:
 	vae.requires_grad_(False)
 	unet.train()
 
+	if args.train_method == "lora":
+		unet.requires_grad_(False)
+		lora_config = LoraConfig(
+			r=args.lora_rank,
+			lora_alpha=args.lora_alpha,
+			lora_dropout=args.lora_dropout,
+			init_lora_weights="gaussian",
+			target_modules=["to_q", "to_k", "to_v", "to_out.0"],
+		)
+		unet.add_adapter(lora_config)
+
 	text_encoder.to(device)
 	vae.to(device)
 	unet.to(device)
 
-	dtype = torch.float16 if args.fp16 else torch.float32
-	if dtype == torch.float16:
-		text_encoder.to(dtype=dtype)
-		vae.to(dtype=dtype)
-		unet.to(dtype=dtype)
+	use_amp = args.fp16 and device.type == "cuda"
+	if args.fp16 and device.type != "cuda":
+		print("Warning: --fp16 is enabled but CUDA is unavailable. Training will run in float32.")
 
-	optimizer = torch.optim.AdamW(unet.parameters(), lr=args.learning_rate)
+	dtype = torch.float32
+
+	params_to_optimize = [p for p in unet.parameters() if p.requires_grad]
+	if not params_to_optimize:
+		raise RuntimeError("No trainable parameters found. Check training configuration.")
+
+	optimizer = torch.optim.AdamW(params_to_optimize, lr=args.learning_rate)
+	scaler = torch.cuda.amp.GradScaler(enabled=use_amp)
+
+	trainable_param_count = sum(p.numel() for p in params_to_optimize)
+	print(f"Training method: {args.train_method}")
+	print(f"Trainable parameters: {trainable_param_count:,}")
 
 	total_steps = args.epochs * math.ceil(len(dataset) / args.batch_size)
 	progress_bar = tqdm(total=total_steps, desc="Training")
@@ -140,8 +161,9 @@ def train(args: argparse.Namespace) -> None:
 			prompts = batch["prompts"]
 
 			with torch.no_grad():
-				latents = vae.encode(pixel_values).latent_dist.sample()
-				latents = latents * vae.config.scaling_factor
+				with torch.autocast(device_type="cuda", dtype=torch.float16, enabled=use_amp):
+					latents = vae.encode(pixel_values).latent_dist.sample()
+					latents = latents * vae.config.scaling_factor
 
 			noise = torch.randn_like(latents)
 			timesteps = torch.randint(
@@ -164,14 +186,24 @@ def train(args: argparse.Namespace) -> None:
 			input_ids = tokenized.input_ids.to(device)
 
 			with torch.no_grad():
-				encoder_hidden_states = text_encoder(input_ids)[0]
+				with torch.autocast(device_type="cuda", dtype=torch.float16, enabled=use_amp):
+					encoder_hidden_states = text_encoder(input_ids)[0]
 
-			model_pred = unet(noisy_latents, timesteps, encoder_hidden_states).sample
-			loss = F.mse_loss(model_pred.float(), noise.float(), reduction="mean")
+			with torch.autocast(device_type="cuda", dtype=torch.float16, enabled=use_amp):
+				model_pred = unet(noisy_latents, timesteps, encoder_hidden_states).sample
+				loss = F.mse_loss(model_pred.float(), noise.float(), reduction="mean")
+
+			if not torch.isfinite(loss):
+				print(f"Warning: non-finite loss ({loss.item()}) at step {global_step + 1}. Skipping this batch.")
+				optimizer.zero_grad(set_to_none=True)
+				continue
 
 			optimizer.zero_grad(set_to_none=True)
-			loss.backward()
-			optimizer.step()
+			scaler.scale(loss).backward()
+			scaler.unscale_(optimizer)
+			torch.nn.utils.clip_grad_norm_(unet.parameters(), max_norm=1.0)
+			scaler.step(optimizer)
+			scaler.update()
 
 			global_step += 1
 			progress_bar.update(1)
@@ -180,30 +212,45 @@ def train(args: argparse.Namespace) -> None:
 			if args.checkpoint_steps > 0 and global_step % args.checkpoint_steps == 0:
 				ckpt_dir = output_dir / f"checkpoint-{global_step}"
 				ckpt_dir.mkdir(parents=True, exist_ok=True)
-				unet.save_pretrained(ckpt_dir / "unet")
+				if args.train_method == "lora":
+					unet.save_attn_procs(ckpt_dir / "lora")
+				else:
+					unet.save_pretrained(ckpt_dir / "unet")
 
 	progress_bar.close()
 
-	pipe = StableDiffusionPipeline.from_pretrained(
-		args.base_model,
-		vae=vae,
-		text_encoder=text_encoder,
-		tokenizer=tokenizer,
-		unet=unet,
-		safety_checker=None,
-	)
-	pipe.save_pretrained(output_dir)
-	print(f"Model saved to: {output_dir}")
+	if args.train_method == "lora":
+		lora_dir = output_dir / "lora"
+		lora_dir.mkdir(parents=True, exist_ok=True)
+		unet.save_attn_procs(lora_dir)
+		(output_dir / "base_model.txt").write_text(args.base_model, encoding="utf-8")
+		print(f"LoRA adapter saved to: {lora_dir}")
+		print(f"Base model recorded in: {output_dir / 'base_model.txt'}")
+	else:
+		pipe = StableDiffusionPipeline.from_pretrained(
+			args.base_model,
+			vae=vae,
+			text_encoder=text_encoder,
+			tokenizer=tokenizer,
+			unet=unet,
+			safety_checker=None,
+		)
+		pipe.save_pretrained(output_dir)
+		print(f"Model saved to: {output_dir}")
 
 
 @torch.inference_mode()
 def generate(args: argparse.Namespace) -> None:
 	device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-	model_path = Path(args.model_path)
 	output_dir = Path(args.output_dir)
 	output_dir.mkdir(parents=True, exist_ok=True)
 
-	pipe = StableDiffusionPipeline.from_pretrained(model_path, safety_checker=None)
+	if args.lora_path:
+		pipe = StableDiffusionPipeline.from_pretrained(args.base_model, safety_checker=None)
+		pipe.unet.load_attn_procs(args.lora_path)
+	else:
+		model_path = Path(args.model_path)
+		pipe = StableDiffusionPipeline.from_pretrained(model_path, safety_checker=None)
 	pipe = pipe.to(device)
 	if args.fp16 and device.type == "cuda":
 		pipe = pipe.to(dtype=torch.float16)
@@ -230,10 +277,14 @@ def build_parser() -> argparse.ArgumentParser:
 	train_parser.add_argument("--data-root", type=str, default="Dataset/T1")
 	train_parser.add_argument("--output-dir", type=str, default="outputs/sd_t1_mri")
 	train_parser.add_argument("--base-model", type=str, default="runwayml/stable-diffusion-v1-5")
+	train_parser.add_argument("--train-method", type=str, choices=["lora", "full"], default="lora")
+	train_parser.add_argument("--lora-rank", type=int, default=8)
+	train_parser.add_argument("--lora-alpha", type=int, default=16)
+	train_parser.add_argument("--lora-dropout", type=float, default=0.0)
 	train_parser.add_argument("--image-size", type=int, default=256)
 	train_parser.add_argument("--batch-size", type=int, default=2)
 	train_parser.add_argument("--epochs", type=int, default=5)
-	train_parser.add_argument("--learning-rate", type=float, default=1e-5)
+	train_parser.add_argument("--learning-rate", type=float, default=1e-4)
 	train_parser.add_argument("--num-workers", type=int, default=2)
 	train_parser.add_argument("--checkpoint-steps", type=int, default=500)
 	train_parser.add_argument("--seed", type=int, default=42)
@@ -241,6 +292,8 @@ def build_parser() -> argparse.ArgumentParser:
 
 	gen_parser = subparsers.add_parser("generate", help="Generate T1 MRI samples from a fine-tuned model.")
 	gen_parser.add_argument("--model-path", type=str, default="outputs/sd_t1_mri")
+	gen_parser.add_argument("--base-model", type=str, default="runwayml/stable-diffusion-v1-5")
+	gen_parser.add_argument("--lora-path", type=str, default="")
 	gen_parser.add_argument("--output-dir", type=str, default="outputs/generated")
 	gen_parser.add_argument(
 		"--prompt",

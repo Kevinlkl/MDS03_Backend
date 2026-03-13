@@ -89,11 +89,18 @@ def collate_batch(examples: list[dict[str, torch.Tensor | str]]) -> dict[str, to
 
 
 def train(args: argparse.Namespace) -> None:
+
 	seed_everything(args.seed)
 
-	device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-	if device.type != "cuda":
-		raise RuntimeError("CUDA GPU is required for Stable Diffusion training.")
+	# Device selection: prioritize CUDA, then MPS (Apple Silicon), then CPU
+	if torch.cuda.is_available():
+		device = torch.device("cuda")
+	elif torch.backends.mps.is_available():
+		device = torch.device("mps")
+		print("Using Apple Silicon MPS device for training.")
+	else:
+		device = torch.device("cpu")
+		print("Warning: Training on CPU. This will be very slow.")
 
 	data_root = Path(args.data_root)
 	output_dir = Path(args.output_dir)

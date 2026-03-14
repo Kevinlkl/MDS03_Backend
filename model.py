@@ -1,14 +1,16 @@
 import argparse
+import json
 import math
 import random
 import sys
 from pathlib import Path
+import time
 
 import torch
 import torch.nn.functional as F
 from peft import LoraConfig
 from PIL import Image
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import DataLoader, Dataset, random_split
 from torchvision import transforms
 from tqdm.auto import tqdm
 from transformers import CLIPTextModel, CLIPTokenizer
@@ -87,6 +89,61 @@ def collate_batch(examples: list[dict[str, torch.Tensor | str]]) -> dict[str, to
 	prompts = [ex["prompt"] for ex in examples]
 	return {"pixel_values": pixel_values, "prompts": prompts}
 
+@torch.no_grad()
+def evaluate_diffusion_loss(
+    dataloader: DataLoader,
+    tokenizer: CLIPTokenizer,
+    text_encoder: CLIPTextModel,
+    vae: AutoencoderKL,
+    unet: UNet2DConditionModel,
+    noise_scheduler: DDPMScheduler,
+    device: torch.device,
+    use_amp: bool,
+) -> float:
+    unet.eval()
+    total_loss = 0.0
+    total_batches = 0
+
+    for batch in dataloader:
+        pixel_values = batch["pixel_values"].to(device=device, dtype=torch.float32)
+        prompts = batch["prompts"]
+
+        with torch.autocast(device_type="cuda", dtype=torch.float16, enabled=use_amp):
+            latents = vae.encode(pixel_values).latent_dist.sample()
+            latents = latents * vae.config.scaling_factor
+
+        noise = torch.randn_like(latents)
+        timesteps = torch.randint(
+            low=0,
+            high=noise_scheduler.config.num_train_timesteps,
+            size=(latents.shape[0],),
+            device=device,
+            dtype=torch.long,
+        )
+        noisy_latents = noise_scheduler.add_noise(latents, noise, timesteps)
+
+        tokenized = tokenizer(
+            prompts,
+            padding="max_length",
+            truncation=True,
+            max_length=tokenizer.model_max_length,
+            return_tensors="pt",
+        )
+        input_ids = tokenized.input_ids.to(device)
+
+        with torch.autocast(device_type="cuda", dtype=torch.float16, enabled=use_amp):
+            encoder_hidden_states = text_encoder(input_ids)[0]
+            model_pred = unet(noisy_latents, timesteps, encoder_hidden_states).sample
+            loss = F.mse_loss(model_pred.float(), noise.float(), reduction="mean")
+
+        if torch.isfinite(loss):
+            total_loss += loss.item()
+            total_batches += 1
+
+    unet.train()
+    if total_batches == 0:
+        return float("inf")
+    return total_loss / total_batches
 
 def train(args: argparse.Namespace) -> None:
 
@@ -107,14 +164,40 @@ def train(args: argparse.Namespace) -> None:
 	output_dir.mkdir(parents=True, exist_ok=True)
 
 	dataset = T1TumorPromptDataset(data_root=data_root, image_size=args.image_size)
-	dataloader = DataLoader(
+
+	val_size = max(1, int(len(dataset) * args.val_split))
+	train_size = len(dataset) - val_size
+
+	if train_size <= 0:
+		raise ValueError("Validation split is too large for the dataset.")
+
+	train_dataset, val_dataset = random_split(
 		dataset,
+		[train_size, val_size],
+		generator=torch.Generator().manual_seed(args.seed),
+	)
+
+	train_loader = DataLoader(
+		train_dataset,
 		batch_size=args.batch_size,
 		shuffle=True,
 		num_workers=args.num_workers,
 		pin_memory=True,
 		collate_fn=collate_batch,
 	)
+
+	val_loader = DataLoader(
+		val_dataset,
+		batch_size=args.batch_size,
+		shuffle=False,
+		num_workers=args.num_workers,
+		pin_memory=True,
+		collate_fn=collate_batch,
+	)
+
+	print(f"Total samples: {len(dataset)}")
+	print(f"Train samples: {len(train_dataset)}")
+	print(f"Validation samples: {len(val_dataset)}")
 
 	tokenizer = CLIPTokenizer.from_pretrained(args.base_model, subfolder="tokenizer")
 	text_encoder = CLIPTextModel.from_pretrained(args.base_model, subfolder="text_encoder")
@@ -158,12 +241,29 @@ def train(args: argparse.Namespace) -> None:
 	print(f"Training method: {args.train_method}")
 	print(f"Trainable parameters: {trainable_param_count:,}")
 
-	total_steps = args.epochs * math.ceil(len(dataset) / args.batch_size)
+	total_steps = args.epochs * math.ceil(len(train_dataset) / args.batch_size)
 	progress_bar = tqdm(total=total_steps, desc="Training")
 	global_step = 0
+	history = {
+		"train_method": args.train_method,
+		"base_model": args.base_model,
+		"epochs": args.epochs,
+		"batch_size": args.batch_size,
+		"image_size": args.image_size,
+		"learning_rate": args.learning_rate,
+		"trainable_parameters": trainable_param_count,
+		"train_size": len(train_dataset),
+		"val_size": len(val_dataset),
+		"epoch_metrics": [],
+	}
+	best_val_loss = float("inf")
+	training_start_time = time.time()
 
 	for epoch in range(args.epochs):
-		for batch in dataloader:
+		epoch_train_loss = 0.0
+		epoch_train_batches = 0
+
+		for batch in train_loader:
 			pixel_values = batch["pixel_values"].to(device=device, dtype=dtype)
 			prompts = batch["prompts"]
 
@@ -216,6 +316,9 @@ def train(args: argparse.Namespace) -> None:
 			progress_bar.update(1)
 			progress_bar.set_postfix({"epoch": epoch + 1, "loss": f"{loss.item():.4f}"})
 
+			epoch_train_loss += loss.item()
+			epoch_train_batches += 1
+
 			if args.checkpoint_steps > 0 and global_step % args.checkpoint_steps == 0:
 				ckpt_dir = output_dir / f"checkpoint-{global_step}"
 				ckpt_dir.mkdir(parents=True, exist_ok=True)
@@ -223,6 +326,44 @@ def train(args: argparse.Namespace) -> None:
 					unet.save_attn_procs(ckpt_dir / "lora")
 				else:
 					unet.save_pretrained(ckpt_dir / "unet")
+
+		avg_train_loss = epoch_train_loss / epoch_train_batches if epoch_train_batches > 0 else float("inf")
+
+		avg_val_loss = evaluate_diffusion_loss(
+			dataloader=val_loader,
+			tokenizer=tokenizer,
+			text_encoder=text_encoder,
+			vae=vae,
+			unet=unet,
+			noise_scheduler=noise_scheduler,
+			device=device,
+			use_amp=use_amp,
+		)
+
+		epoch_record = {
+			"epoch": epoch + 1,
+			"train_loss": avg_train_loss,
+			"val_loss": avg_val_loss,
+		}
+		history["epoch_metrics"].append(epoch_record)
+
+		print(
+			f"\nEpoch {epoch + 1}/{args.epochs} "
+			f"| train_loss={avg_train_loss:.6f} "
+			f"| val_loss={avg_val_loss:.6f}"
+		)
+
+		if avg_val_loss < best_val_loss:
+			best_val_loss = avg_val_loss
+			best_dir = output_dir / "best_model"
+			best_dir.mkdir(parents=True, exist_ok=True)
+
+			if args.train_method == "lora":
+				lora_best_dir = best_dir / "lora"
+				lora_best_dir.mkdir(parents=True, exist_ok=True)
+				unet.save_attn_procs(lora_best_dir)
+			else:
+				unet.save_pretrained(best_dir / "unet")
 
 	progress_bar.close()
 
@@ -244,6 +385,14 @@ def train(args: argparse.Namespace) -> None:
 		)
 		pipe.save_pretrained(output_dir)
 		print(f"Model saved to: {output_dir}")
+		history["best_val_loss"] = best_val_loss
+		history["total_training_time_sec"] = time.time() - training_start_time
+
+		history_path = output_dir / "training_history.json"
+		with history_path.open("w", encoding="utf-8") as f:
+			json.dump(history, f, indent=2)
+
+		print(f"Training history saved to: {history_path}")
 
 
 @torch.inference_mode()
@@ -296,6 +445,7 @@ def build_parser() -> argparse.ArgumentParser:
 	train_parser.add_argument("--checkpoint-steps", type=int, default=500)
 	train_parser.add_argument("--seed", type=int, default=42)
 	train_parser.add_argument("--fp16", action="store_true")
+	train_parser.add_argument("--val-split", type=float, default=0.2)
 
 	gen_parser = subparsers.add_parser("generate", help="Generate T1 MRI samples from a fine-tuned model.")
 	gen_parser.add_argument("--model-path", type=str, default="outputs/sd_t1_mri")

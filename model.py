@@ -7,6 +7,7 @@ from pathlib import Path
 import time
 
 import torch
+from diffusers.loaders.unet import UNet2DConditionLoadersMixin
 import torch.nn.functional as F
 from peft import LoraConfig
 from PIL import Image
@@ -403,7 +404,10 @@ def generate(args: argparse.Namespace) -> None:
 
 	if args.lora_path:
 		pipe = StableDiffusionPipeline.from_pretrained(args.base_model, safety_checker=None)
+		original_load = torch.load
+		torch.load = lambda *args, **kwargs: original_load(*args, **{**kwargs, 'weights_only': False})
 		pipe.unet.load_attn_procs(args.lora_path)
+		torch.load = original_load # Restore it to be safe
 	else:
 		model_path = Path(args.model_path)
 		pipe = StableDiffusionPipeline.from_pretrained(model_path, safety_checker=None)

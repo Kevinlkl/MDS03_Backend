@@ -114,6 +114,11 @@ def evaluate_diffusion_loss(
             latents = latents * vae.config.scaling_factor
 
         noise = torch.randn_like(latents)
+        offset_noise = 0.1
+        if offset_noise > 0:
+            offset = offset_noise * torch.randn(latents.shape[0], latents.shape[1], 1, 1, device=latents.device)
+            noise = noise + offset
+
         timesteps = torch.randint(
             low=0,
             high=noise_scheduler.config.num_train_timesteps,
@@ -225,9 +230,10 @@ def train(args: argparse.Namespace) -> None:
 	vae.to(device)
 	unet.to(device)
 
-	use_amp = args.fp16 and device.type == "cuda"
-	if args.fp16 and device.type != "cuda":
-		print("Warning: --fp16 is enabled but CUDA is unavailable. Training will run in float32.")
+	# use_amp = args.fp16 and device.type == "cuda"
+	use_amp = False
+	# if args.fp16 and device.type != "cuda":
+	# 	print("Warning: --fp16 is enabled but CUDA is unavailable. Training will run in float32.")
 
 	dtype = torch.float32
 
@@ -274,6 +280,10 @@ def train(args: argparse.Namespace) -> None:
 					latents = latents * vae.config.scaling_factor
 
 			noise = torch.randn_like(latents)
+			offset_noise = 0.1
+			if offset_noise > 0:
+				offset = offset_noise * torch.randn(latents.shape[0], latents.shape[1], 1, 1, device=latents.device)
+				noise = noise + offset
 			timesteps = torch.randint(
 				low=0,
 				high=noise_scheduler.config.num_train_timesteps,
@@ -412,8 +422,8 @@ def generate(args: argparse.Namespace) -> None:
 		model_path = Path(args.model_path)
 		pipe = StableDiffusionPipeline.from_pretrained(model_path, safety_checker=None)
 	pipe = pipe.to(device)
-	if args.fp16 and device.type == "cuda":
-		pipe = pipe.to(dtype=torch.float16)
+	# if args.fp16 and device.type == "cuda":
+	# 	pipe = pipe.to(dtype=torch.float16)
 
 	for i in range(args.num_images):
 		image = pipe(
@@ -425,6 +435,16 @@ def generate(args: argparse.Namespace) -> None:
 			width=args.image_size,
 		).images[0]
 		image.save(output_dir / f"sample_{i + 1:03d}.png")
+
+		if args.clean_background:
+			import numpy as np
+			# Convert PIL to numpy
+			img_np = np.array(image)
+			# Force pixels below intensity 15 to be pure black (Step 3)
+			img_np[img_np < 15] = 0 
+			# Convert back to PIL and overwrite
+			image = Image.fromarray(img_np)
+			image.save(output_dir / f"sample_{i + 1:03d}.png")
 
 	print(f"Generated {args.num_images} images in: {output_dir}")
 
@@ -448,8 +468,9 @@ def build_parser() -> argparse.ArgumentParser:
 	train_parser.add_argument("--num-workers", type=int, default=2)
 	train_parser.add_argument("--checkpoint-steps", type=int, default=500)
 	train_parser.add_argument("--seed", type=int, default=42)
-	train_parser.add_argument("--fp16", action="store_true")
+	# train_parser.add_argument("--fp16", action="store_true")
 	train_parser.add_argument("--val-split", type=float, default=0.2)
+	train_parser.add_argument("--offset-noise", type=float, default=0.1, help="Helps learn pure black/white levels")
 
 	gen_parser = subparsers.add_parser("generate", help="Generate T1 MRI samples from a fine-tuned model.")
 	gen_parser.add_argument("--model-path", type=str, default="outputs/sd_t1_mri")
@@ -461,12 +482,17 @@ def build_parser() -> argparse.ArgumentParser:
 		type=str,
 		default="axial T1-weighted brain MRI scan showing glioma, medical imaging, grayscale",
 	)
-	gen_parser.add_argument("--negative-prompt", type=str, default="colorful, cartoon, low quality, distorted")
+	gen_parser.add_argument(
+		"--negative-prompt", 
+		type=str, 
+		default="red, pink, blue, color, RGB, blood, meat, vignette, gray background, noise, artifacts, blur, hazy, texture in background, low contrast, colorful"
+	)
 	gen_parser.add_argument("--num-images", type=int, default=8)
 	gen_parser.add_argument("--inference-steps", type=int, default=40)
-	gen_parser.add_argument("--guidance-scale", type=float, default=7.5)
-	gen_parser.add_argument("--image-size", type=int, default=256)
-	gen_parser.add_argument("--fp16", action="store_true")
+	gen_parser.add_argument("--guidance-scale", type=float, default=5)
+	gen_parser.add_argument("--image-size", type=int, default=512)
+	gen_parser.add_argument("--fp32", action="store_true")
+	gen_parser.add_argument("--clean-background", action="store_true", help="Force low-intensity noise to pure black")
 
 	return parser
 
@@ -477,10 +503,10 @@ def main() -> None:
 		parser.print_help()
 		print("\nExamples:")
 		print(
-			"  python model.py train --data-root Dataset/T1 --output-dir outputs/sd_t1_mri --base-model runwayml/stable-diffusion-v1-5 --epochs 5 --batch-size 2 --image-size 256 --fp16"
+			"  python model.py train --data-root Dataset/T1 --output-dir outputs/sd_t1_mri --base-model runwayml/stable-diffusion-v1-5 --epochs 5 --batch-size 2 --image-size 256"
 		)
 		print(
-			"  python model.py generate --model-path outputs/sd_t1_mri --output-dir outputs/generated --prompt \"axial T1-weighted brain MRI scan showing glioma, medical imaging, grayscale\" --num-images 8 --image-size 256 --fp16"
+			"  python model.py generate --model-path outputs/sd_t1_mri --output-dir outputs/generated --prompt \"axial T1-weighted brain MRI scan showing glioma, medical imaging, grayscale\" --num-images 8 --image-size 256"
 		)
 		return
 

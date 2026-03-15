@@ -399,6 +399,7 @@ def train(args: argparse.Namespace) -> None:
 @torch.inference_mode()
 def generate(args: argparse.Namespace) -> None:
 	device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+	print(f"Using device for generation: {device}")
 	output_dir = Path(args.output_dir)
 	output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -427,7 +428,7 @@ def generate(args: argparse.Namespace) -> None:
 		image.save(output_dir / f"sample_{i + 1:03d}.png")
 
 	print(f"Generated {args.num_images} images in: {output_dir}")
-
+	
 
 def build_parser() -> argparse.ArgumentParser:
 	parser = argparse.ArgumentParser(description="Train/generate Stable Diffusion for T1 brain tumor MRI.")

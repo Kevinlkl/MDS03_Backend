@@ -491,7 +491,7 @@ def build_parser() -> argparse.ArgumentParser:
 	gen_parser.add_argument("--num-images", type=int, default=8)
 	gen_parser.add_argument("--inference-steps", type=int, default=40)
 	gen_parser.add_argument("--guidance-scale", type=float, default=5)
-	gen_parser.add_argument("--image-size", type=int, default=512)
+	gen_parser.add_argument("--image-size", type=int, default=256)
 	gen_parser.add_argument("--fp32", action="store_true")
 	gen_parser.add_argument("--clean-background", action="store_true", help="Force low-intensity noise to pure black")
 

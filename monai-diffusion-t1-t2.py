@@ -88,46 +88,51 @@ def get_device():
     return device
 
 
+from pathlib import Path
+
 def build_data_dicts(t1_dir: str, t2_dir: str):
     """
-    Pair T1 and T2 scans by identical filename.
-
+    Pair T1 and T2 scans by mapping '_t1' suffix to '_t2'.
+    
     Example:
-        T1/patient001.nii.gz
-        T2/patient001.nii.gz
+        T1 folder: BraTS20_Training_001_t1.nii.gz
+        T2 folder: BraTS20_Training_001_t2.nii.gz
     """
     t1_dir = Path(t1_dir)
     t2_dir = Path(t2_dir)
 
-    if not t1_dir.exists():
-        raise FileNotFoundError(f"T1 folder not found: {t1_dir}")
-    if not t2_dir.exists():
-        raise FileNotFoundError(f"T2 folder not found: {t2_dir}")
+    if not t1_dir.exists() or not t2_dir.exists():
+        raise FileNotFoundError("One or both image directories do not exist.")
 
     data_dicts = []
     missing_t2 = []
 
-    for t1_file in sorted(t1_dir.glob("*.nii*")):
-        t2_file = t2_dir / t1_file.name
+    # Iterate through T1 files
+    for t1_file in sorted(t1_dir.glob("*_t1.nii*")):
+        # Construct the expected T2 filename by replacing the suffix
+        t2_name = t1_file.name.replace("_t1.nii", "_t2.nii")
+        t2_file = t2_dir / t2_name
+
         if t2_file.exists():
-            data_dicts.append(
-                {
-                    "patient_id": t1_file.stem.replace(".nii", ""),
-                    "t1": str(t1_file),
-                    "t2": str(t2_file),
-                }
-            )
+            # Extract clean Patient ID (e.g., BraTS20_Training_001)
+            patient_id = t1_file.name.split("_t1")[0]
+            
+            data_dicts.append({
+                "patient_id": patient_id,
+                "t1": str(t1_file),
+                "t2": str(t2_file),
+            })
         else:
             missing_t2.append(t1_file.name)
 
+    # Error handling and reporting
     if missing_t2:
-        print("\nWarning: the following T1 files have no matching T2:")
-        for name in missing_t2:
-            print(f"  - {name}")
+        print(f"\nWarning: {len(missing_t2)} T1 files found no matching T2 pair.")
 
     if not data_dicts:
-        raise ValueError("No paired T1/T2 volumes found.")
+        raise ValueError(f"No paired volumes found. Check if {t2_dir} contains '_t2' files.")
 
+    print(f"Successfully paired {len(data_dicts)} volumes.")
     return data_dicts
 
 

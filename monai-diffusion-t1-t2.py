@@ -7,6 +7,7 @@ from pathlib import Path
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
+from torch.cuda.amp import autocast, GradScaler
 
 from monai.data import CacheDataset
 from monai.transforms import (
@@ -42,8 +43,6 @@ def parse_args():
     )
 
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--train_split", type=float, default=0.8)
-
     parser.add_argument("--batch_size", type=int, default=1)
     parser.add_argument("--num_workers", type=int, default=2)
     parser.add_argument("--cache_rate", type=float, default=1.0)
@@ -72,13 +71,21 @@ def seed_everything(seed: int) -> None:
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
 
-    # make runs more reproducible
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 
 
 def get_device():
-    return torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    if torch.cuda.is_available():
+        device = torch.device("cuda")
+        print("Using CUDA GPU:", torch.cuda.get_device_name(0))
+    elif torch.backends.mps.is_available():
+        device = torch.device("mps")
+        print("Using Apple Silicon MPS device")
+    else:
+        device = torch.device("cpu")
+        print("Warning: Training on CPU. This will be very slow.")
+    return device
 
 
 def build_data_dicts(t1_dir: str, t2_dir: str):
@@ -124,26 +131,7 @@ def build_data_dicts(t1_dir: str, t2_dir: str):
     return data_dicts
 
 
-def split_data(data_dicts, train_split=0.8, seed=42):
-    shuffled = data_dicts.copy()
-    random.Random(seed).shuffle(shuffled)
-
-    if len(shuffled) < 2:
-        raise ValueError("Need at least 2 paired cases to create train/validation split.")
-
-    split_idx = max(1, int(len(shuffled) * train_split))
-    split_idx = min(split_idx, len(shuffled) - 1)
-
-    train_files = shuffled[:split_idx]
-    val_files = shuffled[split_idx:]
-
-    if len(val_files) == 0:
-        raise ValueError("Validation set is empty. Need at least 2 paired cases.")
-
-    return train_files, val_files
-
-
-def get_transforms(args, train=True):
+def get_transforms(args):
     roi_size = (args.roi_x, args.roi_y, args.roi_z)
     pixdim = (args.pixdim_x, args.pixdim_y, args.pixdim_z)
 
@@ -165,32 +153,18 @@ def get_transforms(args, train=True):
             clip=True,
         ),
         CropForegroundd(keys=["t1", "t2"], source_key="t1"),
+        RandSpatialCropd(
+            keys=["t1", "t2"],
+            roi_size=roi_size,
+            random_size=False,
+        ),
+        RandFlipd(keys=["t1", "t2"], prob=0.5, spatial_axis=0),
+        RandFlipd(keys=["t1", "t2"], prob=0.5, spatial_axis=1),
+        RandFlipd(keys=["t1", "t2"], prob=0.5, spatial_axis=2),
+        RandRotate90d(keys=["t1", "t2"], prob=0.5, max_k=3),
+        EnsureTyped(keys=["t1", "t2"]),
     ]
 
-    if train:
-        transforms.extend(
-            [
-                RandSpatialCropd(
-                    keys=["t1", "t2"],
-                    roi_size=roi_size,
-                    random_size=False,
-                ),
-                RandFlipd(keys=["t1", "t2"], prob=0.5, spatial_axis=0),
-                RandFlipd(keys=["t1", "t2"], prob=0.5, spatial_axis=1),
-                RandFlipd(keys=["t1", "t2"], prob=0.5, spatial_axis=2),
-                RandRotate90d(keys=["t1", "t2"], prob=0.5, max_k=3),
-            ]
-        )
-    else:
-        transforms.append(
-            RandSpatialCropd(
-                keys=["t1", "t2"],
-                roi_size=roi_size,
-                random_size=False,
-            )
-        )
-
-    transforms.append(EnsureTyped(keys=["t1", "t2"]))
     return Compose(transforms)
 
 
@@ -212,34 +186,11 @@ def build_model():
     return model
 
 
-def evaluate_loss(model, loader, loss_function, device):
-    model.eval()
-    total_loss = 0.0
-    num_batches = 0
-
-    with torch.no_grad():
-        for batch_data in loader:
-            t1 = batch_data["t1"].to(device)
-            t2 = batch_data["t2"].to(device)
-
-            pred_t2 = model(t1)
-            loss = loss_function(pred_t2, t2)
-
-            total_loss += loss.item()
-            num_batches += 1
-
-    if num_batches == 0:
-        return float("inf")
-
-    return total_loss / num_batches
-
-
-def save_checkpoint(path, model, optimizer, epoch, best_val_loss, config, history):
+def save_checkpoint(path, model, optimizer, epoch, config, history):
     checkpoint = {
         "epoch": epoch,
         "model_state_dict": model.state_dict(),
         "optimizer_state_dict": optimizer.state_dict(),
-        "best_val_loss": best_val_loss,
         "config": config,
         "history": history,
     }
@@ -257,46 +208,29 @@ def main():
     output_dir = args.output_dir
     model_dir = os.path.join(output_dir, "models")
     history_path = os.path.join(output_dir, "training_history.json")
-    split_path = os.path.join(output_dir, "data_split.json")
+    paired_data_path = os.path.join(output_dir, "paired_data.json")
 
     device = get_device()
 
     os.makedirs(output_dir, exist_ok=True)
     os.makedirs(model_dir, exist_ok=True)
 
-    print(f"Using device: {device}")
     print(f"Dataset root: {dataset_root}")
     print(f"Output dir: {output_dir}")
 
     data_dicts = build_data_dicts(t1_dir, t2_dir)
-    train_files, val_files = split_data(
-        data_dicts,
-        train_split=args.train_split,
-        seed=args.seed,
-    )
-
-    print(f"Total paired cases: {len(data_dicts)}")
-    print(f"Train cases: {len(train_files)}")
-    print(f"Val cases: {len(val_files)}")
+    print(f"Total paired cases used for full training: {len(data_dicts)}")
 
     save_json(
         {
-            "train": train_files,
-            "val": val_files,
+            "all_training_data": data_dicts,
         },
-        split_path,
+        paired_data_path,
     )
 
     train_ds = CacheDataset(
-        data=train_files,
-        transform=get_transforms(args, train=True),
-        cache_rate=args.cache_rate,
-        num_workers=args.num_workers,
-    )
-
-    val_ds = CacheDataset(
-        data=val_files,
-        transform=get_transforms(args, train=False),
+        data=data_dicts,
+        transform=get_transforms(args),
         cache_rate=args.cache_rate,
         num_workers=args.num_workers,
     )
@@ -306,13 +240,8 @@ def main():
         batch_size=args.batch_size,
         shuffle=True,
         num_workers=args.num_workers,
-    )
-
-    val_loader = DataLoader(
-        val_ds,
-        batch_size=args.batch_size,
-        shuffle=False,
-        num_workers=args.num_workers,
+        pin_memory=(device.type == "cuda"),
+        persistent_workers=(args.num_workers > 0),
     )
 
     first_batch = next(iter(train_loader))
@@ -322,6 +251,7 @@ def main():
     model = build_model().to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
     loss_function = nn.L1Loss()
+    scaler = GradScaler(enabled=(device.type == "cuda"))
 
     config = {
         "dataset_root": dataset_root,
@@ -329,7 +259,6 @@ def main():
         "t2_dir": t2_dir,
         "output_dir": output_dir,
         "seed": args.seed,
-        "train_split": args.train_split,
         "batch_size": args.batch_size,
         "num_workers": args.num_workers,
         "cache_rate": args.cache_rate,
@@ -343,14 +272,13 @@ def main():
         "intensity_b_max": args.intensity_b_max,
         "model_name": "UNet3D_T1_to_T2",
         "device": str(device),
+        "training_mode": "full_training_no_validation",
+        "amp_enabled": (device.type == "cuda"),
     }
 
     history = {
         "train_loss": [],
-        "val_loss": [],
     }
-
-    best_val_loss = float("inf")
 
     for epoch in range(1, args.max_epochs + 1):
         model.train()
@@ -358,29 +286,26 @@ def main():
         num_batches = 0
 
         for batch_data in train_loader:
-            t1 = batch_data["t1"].to(device)
-            t2 = batch_data["t2"].to(device)
+            t1 = batch_data["t1"].to(device, non_blocking=(device.type == "cuda"))
+            t2 = batch_data["t2"].to(device, non_blocking=(device.type == "cuda"))
 
-            optimizer.zero_grad()
-            pred_t2 = model(t1)
-            loss = loss_function(pred_t2, t2)
-            loss.backward()
-            optimizer.step()
+            optimizer.zero_grad(set_to_none=True)
+
+            with autocast(enabled=(device.type == "cuda")):
+                pred_t2 = model(t1)
+                loss = loss_function(pred_t2, t2)
+
+            scaler.scale(loss).backward()
+            scaler.step(optimizer)
+            scaler.update()
 
             running_loss += loss.item()
             num_batches += 1
 
         avg_train_loss = running_loss / max(num_batches, 1)
-        avg_val_loss = evaluate_loss(model, val_loader, loss_function, device)
-
         history["train_loss"].append(avg_train_loss)
-        history["val_loss"].append(avg_val_loss)
 
-        print(
-            f"Epoch {epoch}/{args.max_epochs} | "
-            f"Train Loss: {avg_train_loss:.6f} | "
-            f"Val Loss: {avg_val_loss:.6f}"
-        )
+        print(f"Epoch {epoch}/{args.max_epochs} | Train Loss: {avg_train_loss:.6f}")
 
         latest_path = os.path.join(model_dir, "latest_model.pt")
         save_checkpoint(
@@ -388,32 +313,37 @@ def main():
             model,
             optimizer,
             epoch,
-            best_val_loss,
             config,
             history,
         )
 
-        if avg_val_loss < best_val_loss:
-            best_val_loss = avg_val_loss
-            best_path = os.path.join(model_dir, "best_model.pt")
-            save_checkpoint(
-                best_path,
-                model,
-                optimizer,
-                epoch,
-                best_val_loss,
-                config,
-                history,
-            )
-            print(f"Best model updated and saved to: {best_path}")
+        epoch_path = os.path.join(model_dir, f"model_epoch_{epoch}.pt")
+        save_checkpoint(
+            epoch_path,
+            model,
+            optimizer,
+            epoch,
+            config,
+            history,
+        )
 
         save_json(history, history_path)
 
+    final_path = os.path.join(model_dir, "final_model.pt")
+    save_checkpoint(
+        final_path,
+        model,
+        optimizer,
+        args.max_epochs,
+        config,
+        history,
+    )
+
     print("\nTraining finished.")
     print(f"Latest model: {os.path.join(model_dir, 'latest_model.pt')}")
-    print(f"Best model:   {os.path.join(model_dir, 'best_model.pt')}")
+    print(f"Final model:  {os.path.join(model_dir, 'final_model.pt')}")
     print(f"History:      {history_path}")
-    print(f"Split file:   {split_path}")
+    print(f"Data list:    {paired_data_path}")
 
 
 if __name__ == "__main__":

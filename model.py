@@ -405,49 +405,57 @@ def train(args: argparse.Namespace) -> None:
 
 		print(f"Training history saved to: {history_path}")
 
-
 @torch.inference_mode()
 def generate(args: argparse.Namespace) -> None:
-	device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-	print(f"Using device for generation: {device}")
-	output_dir = Path(args.output_dir)
-	output_dir.mkdir(parents=True, exist_ok=True)
+    if torch.cuda.is_available():
+        device = torch.device("cuda")
+        device_name = "CUDA"
+    elif torch.backends.mps.is_available():
+        device = torch.device("mps")
+        device_name = "Apple Silicon MPS"
+    else:
+        device = torch.device("cpu")
+        device_name = "CPU"
+    print(f"Using device for generation: {device_name}")
 
-	if args.lora_path:
-		pipe = StableDiffusionPipeline.from_pretrained(args.base_model, safety_checker=None)
-		original_load = torch.load
-		torch.load = lambda *args, **kwargs: original_load(*args, **{**kwargs, 'weights_only': False})
-		pipe.unet.load_attn_procs(args.lora_path)
-		torch.load = original_load # Restore it to be safe
-	else:
-		model_path = Path(args.model_path)
-		pipe = StableDiffusionPipeline.from_pretrained(model_path, safety_checker=None)
-	pipe = pipe.to(device)
-	# if args.fp16 and device.type == "cuda":
-	# 	pipe = pipe.to(dtype=torch.float16)
+    output_dir = Path(args.output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
 
-	for i in range(args.num_images):
-		image = pipe(
-			prompt=args.prompt,
-			negative_prompt=args.negative_prompt,
-			guidance_scale=args.guidance_scale,
-			num_inference_steps=args.inference_steps,
-			height=args.image_size,
-			width=args.image_size,
-		).images[0]
-		image.save(output_dir / f"sample_{i + 1:03d}.png")
+    if args.lora_path:
+        pipe = StableDiffusionPipeline.from_pretrained(args.base_model, safety_checker=None)
+        original_load = torch.load
+        torch.load = lambda *args, **kwargs: original_load(*args, **{**kwargs, 'weights_only': False})
+        pipe.unet.load_attn_procs(args.lora_path)
+        torch.load = original_load # Restore it to be safe
+    else:
+        model_path = Path(args.model_path)
+        pipe = StableDiffusionPipeline.from_pretrained(model_path, safety_checker=None)
 
-		if args.clean_background:
-			import numpy as np
-			# Convert PIL to numpy
-			img_np = np.array(image)
-			# Force pixels below intensity 15 to be pure black (Step 3)
-			img_np[img_np < 15] = 0 
-			# Convert back to PIL and overwrite
-			image = Image.fromarray(img_np)
-			image.save(output_dir / f"sample_{i + 1:03d}.png")
+    # Move pipeline to the selected device
+    pipe = pipe.to(device)
+    # For MPS, use float32 for accuracy and compatibility
+    if device.type == "mps":
+        pipe = pipe.to(torch.float32)
 
-	print(f"Generated {args.num_images} images in: {output_dir}")
+    for i in range(args.num_images):
+        image = pipe(
+            prompt=args.prompt,
+            negative_prompt=args.negative_prompt,
+            guidance_scale=args.guidance_scale,
+            num_inference_steps=args.inference_steps,
+            height=args.image_size,
+            width=args.image_size,
+        ).images[0]
+        image.save(output_dir / f"sample_{i + 1:03d}.png")
+
+        if args.clean_background:
+            import numpy as np
+            img_np = np.array(image)
+            img_np[img_np < 15] = 0 
+            image = Image.fromarray(img_np)
+            image.save(output_dir / f"sample_{i + 1:03d}.png")
+
+    print(f"Generated {args.num_images} images in: {output_dir}")
 	
 
 def build_parser() -> argparse.ArgumentParser:

@@ -62,13 +62,13 @@ def parse_args() -> argparse.Namespace:
 
     parser.add_argument(
         "--input",
-        default="Dataset//Pituitary",
+        default="Dataset/PET",
         help="Input dataset directory",
     )
 
     parser.add_argument(
         "--output",
-        default="Dataset//Pituitary_256_T1weighted",
+        default="Dataset/PET_256",
         help="Output directory for resized images",
     )
 
@@ -78,7 +78,6 @@ def parse_args() -> argparse.Namespace:
         type=int,
         help="Target width for resizing",
     )
-
     parser.add_argument(
         "--height",
         default=256,

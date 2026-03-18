@@ -66,13 +66,34 @@ def normalize_png_in_folder(root_dir: Path):
 
 if __name__ == "__main__":
     # Your specific FYP directory structure
-    base_dir = Path('Dataset/T1')
+    base_dir = Path('Dataset/PET_256')
     subfolders = [
-        'Glioma_256_T1weighted',
-        'Meningioma_256_T1weighted',
-        'Pituitary_256_T1weighted'
+        '1',
+        '2',
+        '3',
+        '4',
+        '5',
+        '6',
+        '7',
+        '8',
+        '9',
+        '10',
+        '11',
+        '12',
+        '13',
+        '14',
+        '15',
+        '16',
+        '17',
+        '18',
+        '19',
+        '20',
+        '21',
+        '22',
+        '23',
+        '24',
     ]
-    
+
     print("--- Starting Enhanced Medical Image Normalization ---")
     for sub in subfolders:
         folder = base_dir / sub

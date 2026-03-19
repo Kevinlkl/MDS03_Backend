@@ -187,7 +187,62 @@ def convert_nifti_zip_to_png(input_dir: Path, output_dir: Path, axis: int=2) -> 
     print(f"Output folder  : {output_dir}")
     print(f"NIfTI converted: {total_nifti}")
     print(f"PNG saved      : {total_slices}")
-    print(f"Zip failed     : {failed}")                    
+    print(f"Zip failed     : {failed}")
+
+def convert_nifti_dir_to_png(input_dir: Path, output_dir: Path, axis: int=2) -> int:
+    """
+    Convert nested NIfTI files to PNG slices. The function expects the input directory 
+    to contain subfolders (e.g. train, val) with NIfTI files (.nii or .nii.gz). 
+    It applies N4 bias correction, normalises the slices, and saves them as PNG images 
+    in an output directory that mirrors the input structure.
+    """
+    input_dir = Path(input_dir)
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    if not input_dir.exists() or not input_dir.is_dir():
+        raise FileNotFoundError(f"Input directory {input_dir} does not exist or is not a directory")
+    
+    # Recursively find all NIfTI files
+    nifti_files = list(input_dir.rglob("*.nii")) + list(input_dir.rglob("*.nii.gz"))
+    # Remove duplicates if rglob matches .nii.gz for both
+    nifti_files = list(set(nifti_files))
+
+    if not nifti_files:
+        print(f"No NIfTI files found in {input_dir} or its subdirectories.")
+        return
+    
+    total_nifti = 0
+    total_slices = 0
+    failed = 0
+
+    for nifti_file in nifti_files:
+        try: 
+            # Recreate the folder structure in the output directory
+            rel_path = nifti_file.relative_to(input_dir)
+            stem = nifti_file.name.replace('.nii.gz', '').replace('.nii', '')
+            
+            case_out_dir = output_dir / rel_path.parent / stem
+            
+            # Load the NIfTI file and get the volume data
+            img = nib.load(str(nifti_file))
+            volume = img.get_fdata()
+
+            saved = save_volume_as_png_slices(volume, case_out_dir, axis=axis)
+            total_nifti += 1
+            total_slices += saved
+            print(f"Converted {rel_path} -> ({saved} slices)")
+
+        except Exception as e:
+            failed += 1
+            print(f"Failed {nifti_file}: {e}")
+
+    print("\nDone")
+    print(f"Input folder   : {input_dir}")
+    print(f"Output folder  : {output_dir}")
+    print(f"NIfTI converted: {total_nifti}")
+    print(f"PNG saved      : {total_slices}")
+    print(f"Failed files   : {failed}")                 
 
 def parse_args() -> argparse.Namespace:
     """
@@ -250,7 +305,8 @@ def print_first_n_metadata(folder: Path, n: int = 10) -> None:
 
 if __name__ == "__main__":
     args = parse_args()
-    convert_nifti_zip_to_png(Path(args.input), Path(args.output), axis=args.axis)
-    print("\nMetadata check:")
-    print_first_n_metadata(Path("Dataset\\T1_PNG\\BraTS20_Training_001_t1.nii\\BraTS20_Training_001_t1"))
-    print_first_n_metadata(Path("Dataset\\T1_PNG\\BraTS20_Training_002_t1.nii\\BraTS20_Training_002_t1"))
+    # convert_nifti_zip_to_png(Path(args.input), Path(args.output), axis=args.axis)
+    convert_nifti_dir_to_png(Path(args.input), Path(args.output), axis=args.axis)
+    # print("\nMetadata check:")
+    # print_first_n_metadata(Path("Dataset\\T1_PNG\\BraTS20_Training_001_t1.nii\\BraTS20_Training_001_t1"))
+    # print_first_n_metadata(Path("Dataset\\T1_PNG\\BraTS20_Training_002_t1.nii\\BraTS20_Training_002_t1"))

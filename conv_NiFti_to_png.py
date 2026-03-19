@@ -9,13 +9,15 @@ import numpy as np
 from PIL import Image, UnidentifiedImageError
 import tqdm as tqdm
 import SimpleITK as sitk
+import cv2
 
 SUPPORTED_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.bmp', '.tiff', '.tif'}
 
 def normalize_to_uint8(slice_data: np.ndarray, p_low: float=0.5, p_high: float=99.5) -> np.ndarray:
     """
     Normalise the slice data to uint8 (0-255) using percentile clipping where
-    p_low and p_high define the percentiles for clipping to reduce the effect of outliers.
+    p_low and p_high define the percentiles for clipping to reduce the effect of outliers,
+    and apply CLAHE for enhanced constrast.
 
     args:
     slice_data: 2D numpy array of the slice
@@ -38,7 +40,11 @@ def normalize_to_uint8(slice_data: np.ndarray, p_low: float=0.5, p_high: float=9
     # Clip and normalise to 0-255
     arr = np.clip(arr, lo, hi)
     arr = (arr - lo) / (hi - lo)
-    return (arr * 255).astype(np.uint8)
+    arr_uint8 = (arr * 255).astype(np.uint8)
+
+    # Apply CLAHE (Contrast Limited Adaptive Histogram Equalization)
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+    return clahe.apply(arr_uint8)
 
 def apply_n4_bias_correction(volume: np.ndarray) -> np.ndarray:
     """

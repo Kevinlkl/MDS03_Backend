@@ -16,7 +16,7 @@ def iter_image_files(root_dir: Path) -> Iterable[Path]:
 def resize_dataset_images(
     input_dir: Path,
     output_dir: Path,
-    target_size: tuple[int, int] = (256, 256)
+    target_size: tuple[int, int] = (512, 512)
 ) -> None:
     source_root = Path(input_dir)
     output_root = Path(output_dir)

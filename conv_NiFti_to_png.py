@@ -195,6 +195,8 @@ def convert_nifti_dir_to_png(input_dir: Path, output_dir: Path, axis: int=2) -> 
     to contain subfolders (e.g. train, val) with NIfTI files (.nii or .nii.gz). 
     It applies N4 bias correction, normalises the slices, and saves them as PNG images 
     in an output directory that mirrors the input structure.
+    
+    Skips already-converted files by checking if output directory exists.
     """
     input_dir = Path(input_dir)
     output_dir = Path(output_dir)
@@ -207,6 +209,8 @@ def convert_nifti_dir_to_png(input_dir: Path, output_dir: Path, axis: int=2) -> 
     nifti_files = list(input_dir.rglob("*.nii")) + list(input_dir.rglob("*.nii.gz"))
     # Remove duplicates if rglob matches .nii.gz for both
     nifti_files = list(set(nifti_files))
+    # Sort for consistent ordering
+    nifti_files = sorted(nifti_files)
 
     if not nifti_files:
         print(f"No NIfTI files found in {input_dir} or its subdirectories.")
@@ -215,6 +219,7 @@ def convert_nifti_dir_to_png(input_dir: Path, output_dir: Path, axis: int=2) -> 
     total_nifti = 0
     total_slices = 0
     failed = 0
+    skipped = 0
 
     for nifti_file in nifti_files:
         try: 
@@ -223,6 +228,12 @@ def convert_nifti_dir_to_png(input_dir: Path, output_dir: Path, axis: int=2) -> 
             stem = nifti_file.name.replace('.nii.gz', '').replace('.nii', '')
             
             case_out_dir = output_dir / rel_path.parent / stem
+            
+            # Skip if already converted
+            if case_out_dir.exists() and list(case_out_dir.glob("slice_*.png")):
+                print(f"Skipping {rel_path} (already converted)")
+                skipped += 1
+                continue
             
             # Load the NIfTI file and get the volume data
             img = nib.load(str(nifti_file))
@@ -242,7 +253,8 @@ def convert_nifti_dir_to_png(input_dir: Path, output_dir: Path, axis: int=2) -> 
     print(f"Output folder  : {output_dir}")
     print(f"NIfTI converted: {total_nifti}")
     print(f"PNG saved      : {total_slices}")
-    print(f"Failed files   : {failed}")                 
+    print(f"Skipped files  : {skipped}")
+    print(f"Failed files   : {failed}")           
 
 def parse_args() -> argparse.Namespace:
     """

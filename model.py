@@ -10,9 +10,11 @@ import torch
 from diffusers.loaders.unet import UNet2DConditionLoadersMixin
 import torch.nn.functional as F
 from peft import LoraConfig
-from PIL import Image
+from PIL import Image, ImageFile
 from torch.utils.data import DataLoader, Dataset, random_split
 from torchvision import transforms
+
+ImageFile.LOAD_TRUNCATED_IMAGES = True
 from tqdm.auto import tqdm
 from transformers import CLIPTextModel, CLIPTokenizer
 
@@ -79,10 +81,16 @@ class T1TumorPromptDataset(Dataset):
 
 	def __getitem__(self, idx: int) -> dict[str, torch.Tensor | str]:
 		path, prompt = self.samples[idx]
-		image = Image.open(path).convert("L")
-		image = image.convert("RGB")
-		image = self.transforms(image)
-		return {"pixel_values": image, "prompt": prompt}
+		try:
+			image = Image.open(path).convert("L")
+			image = image.convert("RGB")
+			image = self.transforms(image)
+			return {"pixel_values": image, "prompt": prompt}
+		except Exception as e:
+			print(f"Warning: Skipping bad image {path}: {e}")
+			# Fallback to a random image in the dataset
+			import random
+			return self.__getitem__(random.randint(0, len(self.samples) - 1))
 
 
 def collate_batch(examples: list[dict[str, torch.Tensor | str]]) -> dict[str, torch.Tensor | list[str]]:

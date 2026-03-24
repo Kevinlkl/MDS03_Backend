@@ -47,50 +47,72 @@ def class_name_from_folder(folder_name: str) -> str:
 
 
 class T1TumorPromptDataset(Dataset):
-	def __init__(self, data_root: Path, image_size: int = 256) -> None:
-		self.data_root = Path(data_root)
-		self.samples: list[tuple[Path, str]] = []
-		self.transforms = transforms.Compose(
-			[
-				transforms.Resize((image_size, image_size), interpolation=transforms.InterpolationMode.BILINEAR),
-				transforms.ToTensor(),
-				transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5]),
-			]
-		)
+    def __init__(self, data_root: Path, image_size: int = 256) -> None:
+        self.data_root = Path(data_root)
+        self.samples: list[tuple[list[Path], str]] = []  # Now stores a LIST of 3 paths
+        self.transforms = transforms.Compose(
+            [
+                transforms.Resize((image_size, image_size), interpolation=transforms.InterpolationMode.BILINEAR),
+                transforms.ToTensor(),
+                transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5]),
+            ]
+        )
 
-		if not self.data_root.exists():
-			raise FileNotFoundError(f"Dataset root not found: {self.data_root}")
+        if not self.data_root.exists():
+            raise FileNotFoundError(f"Dataset root not found: {self.data_root}")
 
-		class_dirs = [p for p in self.data_root.iterdir() if p.is_dir()]
-		if not class_dirs:
-			raise ValueError(f"No class folders found under: {self.data_root}")
+        class_dirs = [p for p in self.data_root.iterdir() if p.is_dir()]
+        if not class_dirs:
+            raise ValueError(f"No class folders found under: {self.data_root}")
 
-		for class_dir in sorted(class_dirs):
-			tumor_name = class_name_from_folder(class_dir.name)
-			prompt = f"axial T1-weighted brain MRI scan showing {tumor_name}, medical imaging, grayscale"
+        for class_dir in sorted(class_dirs):
+            tumor_name = class_name_from_folder(class_dir.name)
+            prompt = f"axial T1-weighted brain MRI scan showing {tumor_name}, medical imaging, grayscale"
 
-			for img_path in class_dir.rglob("*"):
-				if img_path.is_file() and img_path.suffix.lower() in VALID_EXTENSIONS:
-					self.samples.append((img_path, prompt))
+            # Iterate over patient folders inside the class directory
+            for patient_dir in sorted(class_dir.iterdir()):
+                if not patient_dir.is_dir(): continue
 
-		if not self.samples:
-			raise ValueError(f"No image files found under: {self.data_root}")
+                # Collect and SORT all valid images in this patient's folder
+                patient_images = []
+                for img_path in sorted(patient_dir.rglob("*")):
+                    if img_path.is_file() and img_path.suffix.lower() in VALID_EXTENSIONS:
+                        patient_images.append(img_path)
+                
+                # Create rolling triplets [t-1, t, t+1]
+                if len(patient_images) >= 3:
+                    for i in range(1, len(patient_images) - 1):
+                        triplet = [
+                            patient_images[i - 1], # t-1 (Red)
+                            patient_images[i],     # t   (Green)
+                            patient_images[i + 1]  # t+1 (Blue)
+                        ]
+                        self.samples.append((triplet, prompt))
 
-	def __len__(self) -> int:
-		return len(self.samples)
+        if not self.samples:
+            raise ValueError(f"No valid triplets found under: {self.data_root}")
 
-	def __getitem__(self, idx: int) -> dict[str, torch.Tensor | str]:
-		path, prompt = self.samples[idx]
-		try:
-			image = Image.open(path).convert("L")
-			image = image.convert("RGB")
-			image = self.transforms(image)
-			return {"pixel_values": image, "prompt": prompt}
-		except Exception as e:
-			print(f"Warning: Skipping bad image {path}: {e}")
-			# Fallback to a random image in the dataset
-			import random
-			return self.__getitem__(random.randint(0, len(self.samples) - 1))
+    def __len__(self) -> int:
+        return len(self.samples)
+
+    def __getitem__(self, idx: int) -> dict[str, torch.Tensor | str]:
+        paths, prompt = self.samples[idx]
+        try:
+            # Open the 3 sequential images as purely grayscale
+            img_t_minus_1 = Image.open(paths[0]).convert("L")
+            img_t = Image.open(paths[1]).convert("L")
+            img_t_plus_1 = Image.open(paths[2]).convert("L")
+
+            # Merge them into R, G, B channels of a single 3-channel image
+            image = Image.merge("RGB", (img_t_minus_1, img_t, img_t_plus_1))
+            
+            image = self.transforms(image)
+            return {"pixel_values": image, "prompt": prompt}
+        except Exception as e:
+            print(f"Warning: Skipping bad triplet at index {idx}: {e}")
+            # Fallback to a random functional triplet
+            import random
+            return self.__getitem__(random.randint(0, len(self.samples) - 1))
 
 
 def collate_batch(examples: list[dict[str, torch.Tensor | str]]) -> dict[str, torch.Tensor | list[str]]:
@@ -454,17 +476,24 @@ def generate(args: argparse.Namespace) -> None:
             height=args.image_size,
             width=args.image_size,
         ).images[0]
-        image.save(output_dir / f"sample_{i + 1:03d}.png")
+
+        # The output 'image' is a 3-channel RGB image.
+        # Split it into R, G, B channels and save them as individual grayscale slices (t-1, t, t+1)
+        r, g, b = image.split()
+        base_name = output_dir / f"sample_{i + 1:03d}"
+        r.save(f"{base_name}_t_minus_1.png")
+        g.save(f"{base_name}_t.png")
+        b.save(f"{base_name}_t_plus_1.png")
 
         if args.clean_background:
             import numpy as np
-            img_np = np.array(image)
-            img_np[img_np < 15] = 0 
-            image = Image.fromarray(img_np)
-            image.save(output_dir / f"sample_{i + 1:03d}.png")
+            for suffix, img_channel in zip(["_t_minus_1", "_t", "_t_plus_1"], [r, g, b]):
+                img_np = np.array(img_channel)
+                img_np[img_np < 15] = 0
+                cleaned_img = Image.fromarray(img_np)
+                cleaned_img.save(f"{base_name}{suffix}.png")
 
-    print(f"Generated {args.num_images} images in: {output_dir}")
-	
+    print(f"Generated {args.num_images} image triplets in: {output_dir}")
 
 def build_parser() -> argparse.ArgumentParser:
 	parser = argparse.ArgumentParser(description="Train/generate Stable Diffusion for T1 brain tumor MRI.")

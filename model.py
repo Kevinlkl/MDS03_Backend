@@ -567,9 +567,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-<<<<<<< HEAD
 	main()
-=======
-	main()
-message.txt
->>>>>>> 1f0956e2570eb6341f5a8c31f8a8e30c207b8713

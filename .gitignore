@@ -4,3 +4,18 @@ __pycache__/
 .DS_Store
 *.pyc
 Dataset/
+
+# Large model weights and artifacts (use local storage)
+models/
+outputs/
+*.pth
+*.safetensors
+*.pt
+
+# Environment configuration
+.env
+.env.local
+
+# IDE
+.idea/
+.vscode/settings.json

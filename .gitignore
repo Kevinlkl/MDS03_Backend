@@ -8,7 +8,6 @@ Dataset/
 # Large model weights and artifacts (use local storage)
 models/
 outputs/
-*.pth
 *.safetensors
 *.pt
 

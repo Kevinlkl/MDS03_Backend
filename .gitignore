@@ -3,6 +3,7 @@ venv/
 __pycache__/
 .DS_Store
 *.pyc
+*.pth
 Dataset/
 
 # Large model weights and artifacts (use local storage)

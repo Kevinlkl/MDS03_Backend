@@ -6,7 +6,6 @@ __pycache__/
 Dataset/
 
 # Large model weights and artifacts (use local storage)
-models/
 outputs/
 *.safetensors
 

@@ -9,7 +9,6 @@ Dataset/
 models/
 outputs/
 *.safetensors
-*.pt
 
 # Environment configuration
 .env

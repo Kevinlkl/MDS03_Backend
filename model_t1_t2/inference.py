@@ -3,11 +3,11 @@
 from pathlib import Path
 import torch
 
-from config import Config
-from preprocess import MRIProcessor
-from postprocess import save_nifti
-from models.autoencoder import load_autoencoder
-from models.diffusion_unet import load_latent_diffusion_unet, build_scheduler
+from model_t1_t2.config import Config
+from model_t1_t2.preprocess import MRIProcessor
+from model_t1_t2.postprocess import save_nifti
+from model_t1_t2.models.autoencoder import load_autoencoder
+from model_t1_t2.models.diffusion_unet import load_latent_diffusion_unet, build_scheduler
 
 
 class InferencePipeline:
@@ -80,13 +80,16 @@ class InferencePipeline:
         return pred
 
     @torch.no_grad()
-    def reverse_diffusion(self, z_cond: torch.Tensor) -> torch.Tensor:
+    def reverse_diffusion(self, z_cond: torch.Tensor, num_inference_steps: int | None = None) -> torch.Tensor:
         """
         Run reverse diffusion starting from random noise.
         """
+        if num_inference_steps is None:
+            num_inference_steps = Config.NUM_INFERENCE_STEPS
+
         z = torch.randn_like(z_cond).to(self.device)
 
-        self.scheduler.set_timesteps(Config.NUM_INFERENCE_STEPS)
+        self.scheduler.set_timesteps(num_inference_steps)
 
         for t in self.scheduler.timesteps:
             if not torch.is_tensor(t):
@@ -110,7 +113,7 @@ class InferencePipeline:
         return z
 
     @torch.no_grad()
-    def run(self, input_path: str, output_path: str = None) -> str:
+    def run(self, input_path: str, output_path: str = None, num_inference_steps: int | None = None) -> str:
         """
         Full inference pipeline:
         1. preprocess T1
@@ -126,7 +129,9 @@ class InferencePipeline:
         z_cond = self.encode_condition(t1)
 
         # reverse diffusion
-        z_pred = self.reverse_diffusion(z_cond)
+        z_pred = self.reverse_diffusion(
+            z_cond=z_cond,
+            num_inference_steps=num_inference_steps)
 
         # decode predicted latent to T2
         pred_t2 = self.decode_latent(z_pred)

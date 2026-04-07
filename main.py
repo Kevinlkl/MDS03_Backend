@@ -1,6 +1,8 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from api.t1_t2_inference import router as t1_t2_router
+
 app = FastAPI()
 
 origins = ["http://localhost:4200"]
@@ -12,6 +14,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )   
+
+app.include_router(t1_t2_router)
 
 @app.get("/api/hello")
 def read_root():

@@ -11,3 +11,4 @@ nibabel
 numpy
 fastapi
 uvicorn
+scikit-image

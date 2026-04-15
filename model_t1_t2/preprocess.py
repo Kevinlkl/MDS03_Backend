@@ -23,7 +23,7 @@ class MRIProcessor:
         self,
         spatial_size: Tuple[int, int, int] = (96, 96, 96),
         pixdim: Tuple[float, float, float] = (1.5, 1.5, 1.5),
-        source_key: str = "t1",
+        source_key: Tuple[str, str] = ("t1", "t2"),
         intensity_lower: float = 0.0,
         intensity_upper: float = 99.5,
         b_min: float = -1.0,

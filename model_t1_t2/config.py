@@ -9,9 +9,11 @@ BASE_DIR = Path(__file__).resolve().parent
 CHECKPOINTS_DIR = BASE_DIR / "checkpoints"
 UPLOADS_DIR = BASE_DIR / "uploads"
 OUTPUTS_DIR = BASE_DIR / "outputs"
+GT_DIR = BASE_DIR / "samples"
 
 UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
 OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
+GT_DIR.mkdir(parents=True, exist_ok=True)
 
 
 class Config:
@@ -24,6 +26,7 @@ class Config:
     CHECKPOINTS_DIR = CHECKPOINTS_DIR
     UPLOADS_DIR = UPLOADS_DIR
     OUTPUTS_DIR = OUTPUTS_DIR
+    GT_DIR = GT_DIR
     # -------------------------------
     # Checkpoints
     # -------------------------------

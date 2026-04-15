@@ -9,6 +9,7 @@ from model_t1_t2.models.autoencoder import load_autoencoder
 from model_t1_t2.models.diffusion_unet import load_latent_diffusion_unet, build_scheduler
 
 
+
 class InferencePipeline:
     def __init__(self):
         self.device = Config.DEVICE

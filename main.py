@@ -2,9 +2,9 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from api.t1_t2_inference import router as t1_t2_router
-from api.preview import router as preview_router
-from api.processed_preview import router as processed_preview_router
-from api.analysis import router as analysis_router
+# from api.preview import router as preview_router
+# from api.processed_preview import router as processed_preview_router
+# from api.analysis import router as analysis_router
 
 app = FastAPI()
 
@@ -19,9 +19,9 @@ app.add_middleware(
 )   
 
 app.include_router(t1_t2_router)
-app.include_router(preview_router)
-app.include_router(processed_preview_router)
-app.include_router(analysis_router)
+# app.include_router(preview_router)
+# app.include_router(processed_preview_router)
+# app.include_router(analysis_router)
 
 @app.get("/api/hello")
 def read_root():

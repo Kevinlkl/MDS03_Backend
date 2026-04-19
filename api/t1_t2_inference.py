@@ -2,6 +2,7 @@ from pathlib import Path
 import tempfile
 import shutil
 import base64
+from typing import Optional
 
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException
 from fastapi.responses import FileResponse
@@ -30,7 +31,7 @@ def png_buffer_to_base64(png_buffer) -> str:
 @router.post("/infer_t1_t2")
 async def infer_mri(
     file: UploadFile = File(...),
-    ground_truth_file: UploadFile | None = File(None),
+    ground_truth_file: Optional[UploadFile] = File(None),
     num_inference_steps: int = Form(1000),
 ):
     if not file.filename.endswith((".nii", ".nii.gz")):
@@ -110,7 +111,7 @@ async def infer_mri(
             "metrics": {
                 "psnr": round(float(metrics["psnr"]), 4) if metrics["psnr"] is not None else None,
                 "ssim": round(float(metrics["ssim"]), 4) if metrics["ssim"] is not None else None,
-                "fid": None,
+                "fid": round(float(metrics["fid"]), 4) if metrics["fid"] is not None else None,
             },
             "previews": {
                 "input": t1_preview_b64,

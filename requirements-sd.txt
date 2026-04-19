@@ -6,6 +6,7 @@ peft>=0.12.0
 Pillow>=10.3.0
 tqdm>=4.66.0
 torch
+torchvision
 monai
 nibabel
 numpy

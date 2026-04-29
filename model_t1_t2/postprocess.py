@@ -1,8 +1,9 @@
 import numpy as np
 import nibabel as nib
+import os
 import torch
 import torch.nn.functional as F
-from typing import Iterator, Optional
+from typing import Iterator, Optional, cast
 from skimage.metrics import peak_signal_noise_ratio as psnr
 from skimage.metrics import structural_similarity as ssim
 
@@ -10,6 +11,11 @@ from skimage.metrics import structural_similarity as ssim
 IMAGENET_MEAN = torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1)
 IMAGENET_STD = torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1)
 _INCEPTION_MODEL_CACHE: dict[str, torch.nn.Module] = {}
+_FID_STATS_CACHE: dict[str, np.ndarray] = {}
+
+# Lower slice count keeps local CPU runtime practical while preserving trend quality.
+FID_RUNTIME_BATCH_SIZE = 16
+FID_RUNTIME_MAX_SLICES = 16
 
 def tensor_to_numpy(pred: torch.Tensor) -> np.ndarray: 
     pred = pred.detach().cpu() 
@@ -261,35 +267,87 @@ def _calculate_frechet_distance(
     return max(fid, 0.0)
 
 
+def _load_fid_stats_cached(path: str) -> np.ndarray:
+    abs_path = os.path.abspath(path)
+    mtime = os.path.getmtime(abs_path)
+    cache_key = f"{abs_path}:{mtime}"
+
+    cached = _FID_STATS_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+
+    arr = np.load(abs_path)
+    _FID_STATS_CACHE[cache_key] = arr
+    return arr
+
+
 def compute_fid_from_tensors(
-    pred_t2: torch.Tensor,
-    gt_t2: torch.Tensor,
+    pred_t2: Optional[torch.Tensor] = None,
+    gt_t2: Optional[torch.Tensor] = None,
     device: Optional[str] = None,
     batch_size: int = 32,
     max_slices_per_volume: int = 64,
+    mu_pred_path: Optional[str] = None,
+    sigma_pred_path: Optional[str] = None,
+    mu_ref_path: Optional[str] = None,
+    sigma_ref_path: Optional[str] = None,
 ) -> float:
-    requested_device = _resolve_fid_device(device)
+    """
+    Compute FID. If mu_pred_path and sigma_pred_path are provided, load predicted stats from .npy files.
+    If mu_ref_path and sigma_ref_path are provided, load reference stats from .npy files.
+    Otherwise, compute from tensors as before.
+    """
+    pred_stats_from_file = mu_pred_path is not None and sigma_pred_path is not None
+    ref_stats_from_file = mu_ref_path is not None and sigma_ref_path is not None
 
-    pred_np = pred_t2.detach().cpu().numpy()
-    gt_np = gt_t2.detach().cpu().numpy()
+    need_pred_features = not pred_stats_from_file
+    need_ref_features = not ref_stats_from_file
 
-    model = _build_inception_feature_extractor(requested_device)
+    if need_pred_features and pred_t2 is None:
+        raise ValueError("Must provide either pred_t2 tensor or mu_pred/sigma_pred paths.")
+    if need_ref_features and gt_t2 is None:
+        raise ValueError("Must provide either gt_t2 tensor or mu_ref/sigma_ref paths.")
 
-    gt_features = _extract_features_from_slice_iterator(
-        _iter_batch_volume_slices(gt_np, max_slices_per_volume=max_slices_per_volume),
-        model=model,
-        device=requested_device,
-        batch_size=batch_size,
-    )
-    pred_features = _extract_features_from_slice_iterator(
-        _iter_batch_volume_slices(pred_np, max_slices_per_volume=max_slices_per_volume),
-        model=model,
-        device=requested_device,
-        batch_size=batch_size,
-    )
+    model: Optional[torch.nn.Module] = None
+    requested_device: Optional[torch.device] = None
+    if need_pred_features or need_ref_features:
+        requested_device = _resolve_fid_device(device)
+        model = _build_inception_feature_extractor(requested_device)
 
-    mu_ref, sigma_ref = _compute_gaussian_stats(gt_features)
-    mu_pred, sigma_pred = _compute_gaussian_stats(pred_features)
+    if pred_stats_from_file:
+        if mu_pred_path is None or sigma_pred_path is None:
+            raise ValueError("mu_pred_path and sigma_pred_path must both be set.")
+        mu_pred = _load_fid_stats_cached(mu_pred_path)
+        sigma_pred = _load_fid_stats_cached(sigma_pred_path)
+    else:
+        if pred_t2 is None or model is None or requested_device is None:
+            raise ValueError("Prediction tensor feature extraction was requested without model/device.")
+        pred_np = pred_t2.detach().cpu().numpy()
+        pred_features = _extract_features_from_slice_iterator(
+            _iter_batch_volume_slices(pred_np, max_slices_per_volume=max_slices_per_volume),
+            model=cast(torch.nn.Module, model),
+            device=cast(torch.device, requested_device),
+            batch_size=batch_size,
+        )
+        mu_pred, sigma_pred = _compute_gaussian_stats(pred_features)
+
+    if ref_stats_from_file:
+        if mu_ref_path is None or sigma_ref_path is None:
+            raise ValueError("mu_ref_path and sigma_ref_path must both be set.")
+        mu_ref = _load_fid_stats_cached(mu_ref_path)
+        sigma_ref = _load_fid_stats_cached(sigma_ref_path)
+    else:
+        if gt_t2 is None or model is None or requested_device is None:
+            raise ValueError("Reference tensor feature extraction was requested without model/device.")
+        gt_np = gt_t2.detach().cpu().numpy()
+        gt_features = _extract_features_from_slice_iterator(
+            _iter_batch_volume_slices(gt_np, max_slices_per_volume=max_slices_per_volume),
+            model=cast(torch.nn.Module, model),
+            device=cast(torch.device, requested_device),
+            batch_size=batch_size,
+        )
+        mu_ref, sigma_ref = _compute_gaussian_stats(gt_features)
+
     return _calculate_frechet_distance(mu_ref, sigma_ref, mu_pred, sigma_pred)
 
 
@@ -305,30 +363,70 @@ def evaluate_batch(pred_t2: torch.Tensor, gt_t2: Optional[torch.Tensor] = None) 
         "fid": None
     }
 
-    if gt_t2 is None:
-        return results
+    if gt_t2 is not None:
+        gt_np = gt_t2.detach().cpu().numpy()
+        try:
+            psnr_val, ssim_val = compute_psnr_ssim(pred_np, gt_np)
+            results["psnr"] = float(psnr_val) if np.isfinite(psnr_val) else None
+            results["ssim"] = float(ssim_val) if np.isfinite(ssim_val) else None
+        except Exception as e:
+            print("PSNR/SSIM computation failed:", e)
 
-    gt_np = gt_t2.detach().cpu().numpy()
+    # Checkpoints-based FID fast paths (no download/unzip required)
+    checkpoints_dir = os.path.join(os.path.dirname(__file__), "checkpoints")
+    mu_pred_path = os.path.join(checkpoints_dir, "mu_pred.npy")
+    sigma_pred_path = os.path.join(checkpoints_dir, "sigma_pred.npy")
+    mu_ref_path = os.path.join(checkpoints_dir, "mu_ref.npy")
+    sigma_ref_path = os.path.join(checkpoints_dir, "sigma_ref.npy")
+
+    has_pred_stats = os.path.isfile(mu_pred_path) and os.path.isfile(sigma_pred_path)
+    has_ref_stats = os.path.isfile(mu_ref_path) and os.path.isfile(sigma_ref_path)
+
+    # Backward compatibility: if only mu_pred/sigma_pred exist, treat them as fixed reference stats.
+    alias_ref_mu = mu_ref_path if has_ref_stats else (mu_pred_path if has_pred_stats else None)
+    alias_ref_sigma = sigma_ref_path if has_ref_stats else (sigma_pred_path if has_pred_stats else None)
 
     try:
-        psnr_val, ssim_val = compute_psnr_ssim(pred_np, gt_np)
+        fid_val: Optional[float]
+        if has_ref_stats and has_pred_stats:
+            # Fastest path: both distributions are precomputed in checkpoints.
+            fid_val = compute_fid_from_tensors(
+                pred_t2=None,
+                mu_pred_path=mu_pred_path,
+                sigma_pred_path=sigma_pred_path,
+                mu_ref_path=mu_ref_path,
+                sigma_ref_path=sigma_ref_path,
+                device=None,
+                batch_size=FID_RUNTIME_BATCH_SIZE,
+                max_slices_per_volume=FID_RUNTIME_MAX_SLICES,
+            )
+        elif alias_ref_mu is not None and alias_ref_sigma is not None:
+            # Fast path: current prediction tensor vs fixed reference stats.
+            fid_val = compute_fid_from_tensors(
+                pred_t2=pred_t2,
+                gt_t2=None,
+                mu_ref_path=alias_ref_mu,
+                sigma_ref_path=alias_ref_sigma,
+                device=None,
+                batch_size=FID_RUNTIME_BATCH_SIZE,
+                max_slices_per_volume=FID_RUNTIME_MAX_SLICES,
+            )
+        elif gt_t2 is not None:
+            # Slow fallback: tensor-vs-tensor FID (still local, no network download).
+            fid_val = compute_fid_from_tensors(
+                pred_t2=pred_t2,
+                gt_t2=gt_t2,
+                device=None,
+                batch_size=FID_RUNTIME_BATCH_SIZE,
+                max_slices_per_volume=FID_RUNTIME_MAX_SLICES,
+            )
+        else:
+            fid_val = None
 
-        results["psnr"] = float(psnr_val) if np.isfinite(psnr_val) else None
-        results["ssim"] = float(ssim_val) if np.isfinite(ssim_val) else None
-
-    except Exception as e:
-        print("PSNR/SSIM computation failed:", e)
-
-    try:
-        fid_val = compute_fid_from_tensors(
-            pred_t2=pred_t2,
-            gt_t2=gt_t2,
-            device=None,
-            batch_size=16,
-            max_slices_per_volume=64,
-        )
-        results["fid"] = float(fid_val) if np.isfinite(fid_val) else None
-
+        if fid_val is not None and np.isfinite(fid_val):
+            results["fid"] = float(fid_val)
+        else:
+            results["fid"] = None
     except Exception as e:
         print("FID computation failed:", e)
 

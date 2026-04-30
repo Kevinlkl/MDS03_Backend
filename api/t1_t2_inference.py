@@ -34,13 +34,16 @@ async def infer_mri(
     ground_truth_file: Optional[UploadFile] = File(None),
     num_inference_steps: int = Form(1000),
 ):
-    if not file.filename.endswith((".nii", ".nii.gz")):
+    input_filename = file.filename or ""
+    gt_filename = (ground_truth_file.filename or "") if ground_truth_file else ""
+
+    if not input_filename.endswith((".nii", ".nii.gz")):
         raise HTTPException(
             status_code=400,
             detail="Only .nii or .nii.gz files are supported for input file.",
         )
 
-    if ground_truth_file and not ground_truth_file.filename.endswith((".nii", ".nii.gz")):
+    if ground_truth_file and not gt_filename.endswith((".nii", ".nii.gz")):
         raise HTTPException(
             status_code=400,
             detail="Only .nii or .nii.gz files are supported for ground truth file.",
@@ -57,14 +60,14 @@ async def infer_mri(
     output_path = None
 
     try:
-        input_suffix = ".nii.gz" if file.filename.endswith(".nii.gz") else ".nii"
+        input_suffix = ".nii.gz" if input_filename.endswith(".nii.gz") else ".nii"
 
         with tempfile.NamedTemporaryFile(delete=False, suffix=input_suffix) as tmp_input:
             shutil.copyfileobj(file.file, tmp_input)
             input_path = tmp_input.name
 
         if ground_truth_file is not None:
-            gt_suffix = ".nii.gz" if ground_truth_file.filename.endswith(".nii.gz") else ".nii"
+            gt_suffix = ".nii.gz" if gt_filename.endswith(".nii.gz") else ".nii"
             with tempfile.NamedTemporaryFile(delete=False, suffix=gt_suffix) as tmp_gt:
                 shutil.copyfileobj(ground_truth_file.file, tmp_gt)
                 gt_path = tmp_gt.name
@@ -96,10 +99,10 @@ async def infer_mri(
             else None
         )
 
-        if file.filename.endswith(".nii.gz"):
-            base_name = file.filename[:-7]
+        if input_filename.endswith(".nii.gz"):
+            base_name = input_filename[:-7]
         else:
-            base_name = Path(file.filename).stem
+            base_name = Path(input_filename).stem
 
         download_name = f"{base_name}_pred_t2_{num_inference_steps}steps.nii.gz"
 

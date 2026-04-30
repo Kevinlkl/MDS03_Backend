@@ -31,13 +31,13 @@ def load_autoencoder(checkpoint_path, latent_channels=4, device="cpu"):
 		print("Autoencoder checkpoint keys:", checkpoint.keys())
 
 		if "autoencoder_state_dict" in checkpoint:
-			model.load_state_dict(checkpoint["autoencoder_state_dict"])
+			model.load_state_dict(checkpoint["autoencoder_state_dict"], strict=True)
 		elif "model_state_dict" in checkpoint:
-			model.load_state_dict(checkpoint["model_state_dict"])
+			model.load_state_dict(checkpoint["model_state_dict"], strict=True)
 		else:
-			model.load_state_dict(checkpoint)
+			model.load_state_dict(checkpoint, strict=True)
 	else:
-		model.load_state_dict(checkpoint)
+		model.load_state_dict(checkpoint, strict=True)
 
 	model.eval()
 	return model

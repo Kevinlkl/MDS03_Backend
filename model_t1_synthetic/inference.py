@@ -5,6 +5,7 @@ from typing import Any, Optional
 import math
 import zipfile
 
+import nibabel as nib
 from nibabel.loadsave import save as nib_save
 from nibabel.nifti1 import Nifti1Image
 import numpy as np
@@ -13,33 +14,73 @@ import torch
 from model_t1_synthetic.config import Config
 from model_t1_synthetic.models.autoencoder import load_autoencoder
 from model_t1_synthetic.models.diffusion_unet import load_latent_diffusion_unet, build_scheduler
+from model_t1_t2.postprocess import compute_fid_from_tensors
 
 
-def compute_fid_score(tensor: torch.Tensor) -> Optional[float]:
-	"""
-	Compute FID-like quality score based on tensor statistics.
-	FID (Fréchet Inception Distance) is approximated using simple image statistics.
-	Lower is better (range 0-200).
-	
-	For a proper FID, use the full FID computation with InceptionV3 features.
-	This is a simplified approximation.
-	"""
-	try:
-		arr = tensor.detach().cpu().float().numpy()
-		
-		# Compute basic statistics as FID approximation
-		# In practice, you'd use actual Inception features
-		mean = np.mean(arr)
-		std = np.std(arr)
-		
-		# Heuristic FID approximation (0-200 scale)
-		# Ideal: mean ~0, std ~1 for normalized medical images
-		fid_approx = abs(mean) * 50 + abs(std - 1) * 50
-		fid_score = min(200, max(0, float(fid_approx)))
-		
-		return fid_score
-	except Exception:
-		return None
+def _load_generated_batch_from_paths(pred_paths: list[str]) -> torch.Tensor:
+    volumes: list[np.ndarray] = []
+    for pred_path in pred_paths:
+        volume = nib.load(str(pred_path)).get_fdata(dtype=np.float32)
+        if volume.ndim == 4:
+            volume = volume[..., 0]
+        if volume.ndim != 3:
+            raise ValueError(f"Expected 3D volume, got shape {volume.shape} from {pred_path}")
+        volumes.append(volume)
+
+    if not volumes:
+        raise ValueError("pred_paths must contain at least one generated NIfTI volume.")
+
+    batch = np.stack(volumes, axis=0)[:, np.newaxis, ...]
+    return torch.from_numpy(batch).float()
+
+
+def compute_fid_score(
+    pred_paths: list[str],
+    gdrive_file_id: str = "",
+) -> Optional[float]:
+    """
+    Compute FID score for generated T1 images using precomputed checkpoint stats.
+
+    Args:
+        pred_paths: List of paths to generated T1 NIfTI files
+        gdrive_file_id: Deprecated. Kept for backward compatibility and ignored.
+
+    Returns:
+        FID score (lower is better), or None if computation fails
+    """
+    _ = gdrive_file_id
+    try:
+        checkpoints_dir = Config.CHECKPOINTS_DIR
+        mu_ref_path = checkpoints_dir / "mu_ref.npy"
+        sigma_ref_path = checkpoints_dir / "sigma_ref.npy"
+
+        # Backward compatibility: if only mu_pred/sigma_pred exist, treat them as reference stats.
+        if not mu_ref_path.exists() or not sigma_ref_path.exists():
+            mu_ref_path = checkpoints_dir / "mu_pred.npy"
+            sigma_ref_path = checkpoints_dir / "sigma_pred.npy"
+
+        if not mu_ref_path.exists() or not sigma_ref_path.exists():
+            print(
+                "FID computation skipped: missing reference stats at "
+                f"{mu_ref_path} and {sigma_ref_path}"
+            )
+            return None
+
+        pred_batch = _load_generated_batch_from_paths(pred_paths)
+        fid = compute_fid_from_tensors(
+            pred_t2=pred_batch,
+            gt_t2=None,
+            mu_ref_path=str(mu_ref_path),
+            sigma_ref_path=str(sigma_ref_path),
+            device=Config.DEVICE,
+            batch_size=Config.FID_GEN_BATCH,
+            max_slices_per_volume=64,
+        )
+
+        return float(fid)
+    except Exception as e:
+        print(f"FID computation error: {e}")
+        return None
 
 
 def save_nifti_volume(volume: torch.Tensor, output_path: str, affine: Optional[np.ndarray] = None) -> str:
@@ -179,6 +220,43 @@ class SyntheticT1GenerationPipeline:
 
         return results
 
+    def compute_fid_with_reference(
+        self,
+        generated_path: str,
+        gt_tensor: Optional[torch.Tensor] = None,
+    ) -> float:
+        """
+        Compute FID between generated and reference data.
+        
+        Args:
+            generated_path: Path to generated NIfTI file or directory
+            gt_tensor: Optional ground truth tensor. If provided, computes proper FID.
+        
+        Returns:
+            FID score (lower is better)
+        """
+        from model_t1_t2.postprocess import compute_fid_from_tensors
+        
+        # Load generated data
+        gen_path = Path(generated_path)
+        if gen_path.suffix in {".nii", ".gz"}:
+            gen_img = nib.load(str(gen_path))
+            gen_data = gen_img.get_fdata(dtype=np.float32)
+            gen_tensor = torch.from_numpy(gen_data).float().unsqueeze(0).unsqueeze(0)
+        else:
+            raise ValueError(f"Unsupported file type: {gen_path.suffix}")
+        
+        if gt_tensor is None:
+            return float(compute_fid_score([str(gen_path)]) or 0.0)
+        
+        # Compute proper FID
+        return compute_fid_from_tensors(
+            pred_t2=gen_tensor,
+            gt_t2=gt_tensor,
+            device=self.device,
+            batch_size=16,
+            max_slices_per_volume=64,
+        )
 
 class SyntheticT1BatchResult(dict):
     pass

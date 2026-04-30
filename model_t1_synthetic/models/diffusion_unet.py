@@ -9,19 +9,47 @@ def build_latent_diffusion_unet(in_channels, out_channels, device="cpu"):
 			"monai-generative not installed. Run: pip install monai-generative"
 		) from exc
 
+	# Import config to get correct channel dimensions
+	from model_t1_synthetic.config import Config
+
+	# sanitize/derive head channels: ensure head-channel sizes are sensible relative
+	# to the configured `DIFFUSION_CHANNELS`. If user config contains 0 or values
+	# larger than the corresponding channel count, derive a safe default.
+	raw_heads = getattr(Config, "DIFFUSION_HEAD_CHANNELS", None)
+	channels = list(getattr(Config, "DIFFUSION_CHANNELS", ()))
+	if not channels:
+		num_head_channels = None
+	else:
+		# Build a per-level head-channel tuple matching length of channels
+		num_head_channels_list = []
+		for i, c in enumerate(channels):
+			# desired from raw config if available
+			raw_h = None
+			try:
+				raw_h = int(raw_heads[i]) if raw_heads is not None else None
+			except Exception:
+				raw_h = None
+			# If invalid or out-of-range, pick sensible default (channels//4, at least 1)
+			if raw_h is None or raw_h <= 0 or raw_h > c:
+				h = max(1, c // 4)
+			else:
+				h = raw_h
+			num_head_channels_list.append(h)
+		num_head_channels = tuple(num_head_channels_list)
+
 	model = DiffusionModelUNet(
 		spatial_dims=3,
 		in_channels=in_channels,
 		out_channels=out_channels,
 		num_res_blocks=2,
-		num_channels=(64, 128, 256),
+		num_channels=Config.DIFFUSION_CHANNELS,
 		attention_levels=(False, True, True),
-		num_head_channels=(0, 32, 64),
+		num_head_channels=num_head_channels,
 	).to(device)
 	return model
 
 
-def load_latent_diffusion_unet(checkpoint_path, in_channels, out_channels, device="cpu"):
+def load_latent_diffusion_unet(checkpoint_path, in_channels, out_channels, device="cpu", use_ema=True):
 	model = build_latent_diffusion_unet(
 		in_channels=in_channels,
 		out_channels=out_channels,
@@ -32,29 +60,14 @@ def load_latent_diffusion_unet(checkpoint_path, in_channels, out_channels, devic
 
 	print("Diffusion checkpoint keys:", checkpoint.keys())
 
-	# Custom loading that skips mismatched keys
-	state_dict = checkpoint["unet_state_dict"]
-	model_state = model.state_dict()
-	
-	incompatible_keys = {"missing_keys": [], "unexpected_keys": []}
-	loaded_keys = set()
-	
-	for key, param in state_dict.items():
-		if key in model_state:
-			if param.shape == model_state[key].shape:
-				model_state[key].copy_(param)
-				loaded_keys.add(key)
-			else:
-				# Size mismatch - skip this key
-				incompatible_keys["missing_keys"].append(key)
-		else:
-			incompatible_keys["unexpected_keys"].append(key)
-	
-	# Report what was skipped
-	if incompatible_keys["missing_keys"]:
-		print(f"Skipped {len(incompatible_keys['missing_keys'])} keys with shape mismatches")
-	
-	model.load_state_dict(model_state, strict=False)
+	state_dict_key = "ema_unet_state_dict" if use_ema and "ema_unet_state_dict" in checkpoint else "unet_state_dict"
+	if state_dict_key in checkpoint:
+		model.load_state_dict(checkpoint[state_dict_key], strict=True)
+	elif "model_state_dict" in checkpoint:
+		model.load_state_dict(checkpoint["model_state_dict"], strict=True)
+	else:
+		model.load_state_dict(checkpoint, strict=True)
+
 	model.eval()
 
 	metadata = {
@@ -62,6 +75,7 @@ def load_latent_diffusion_unet(checkpoint_path, in_channels, out_channels, devic
 		"latent_channels": checkpoint.get("latent_channels", out_channels),
 		"epoch": checkpoint.get("epoch", None),
 		"best_val_loss": checkpoint.get("best_val_loss", None),
+		"state_dict_key": state_dict_key,
 	}
 
 	return model, metadata

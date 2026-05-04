@@ -33,6 +33,7 @@ async def infer_mri(
     file: UploadFile = File(...),
     ground_truth_file: Optional[UploadFile] = File(None),
     num_inference_steps: int = Form(1000),
+    compute_fid: bool = Form(False),
 ):
     input_filename = file.filename or ""
     gt_filename = (ground_truth_file.filename or "") if ground_truth_file else ""
@@ -80,6 +81,7 @@ async def infer_mri(
             gt_path=gt_path,
             output_path=output_path,
             num_inference_steps=num_inference_steps,
+            compute_fid=compute_fid,
         )
 
         t1 = result["t1"]

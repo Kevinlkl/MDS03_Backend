@@ -142,6 +142,7 @@ class InferencePipeline:
         gt_path: Optional[str] = None,
         output_path: Optional[str] = None,
         num_inference_steps: Optional[int] = None,
+        compute_fid: bool = True,
     ) -> dict:
         """
         If gt_path is provided:
@@ -179,7 +180,7 @@ class InferencePipeline:
         save_nifti(pred_t2, str(output_path_obj))
 
         if gt_t2 is not None:
-            metrics = evaluate_batch(pred_t2, gt_t2)
+            metrics = evaluate_batch(pred_t2, gt_t2, compute_fid=compute_fid)
         else:
             metrics = {
                 "psnr": None,

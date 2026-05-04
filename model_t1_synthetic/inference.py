@@ -220,48 +220,6 @@ class SyntheticT1GenerationPipeline:
 
         return results
 
-    def compute_fid_with_reference(
-        self,
-        generated_path: str,
-        gt_tensor: Optional[torch.Tensor] = None,
-    ) -> float:
-        """
-        Compute FID between generated and reference data.
-        
-        Args:
-            generated_path: Path to generated NIfTI file or directory
-            gt_tensor: Optional ground truth tensor. If provided, computes proper FID.
-        
-        Returns:
-            FID score (lower is better)
-        """
-        from model_t1_t2.postprocess import compute_fid_from_tensors
-        
-        # Load generated data
-        gen_path = Path(generated_path)
-        if gen_path.suffix in {".nii", ".gz"}:
-            gen_img = nib.load(str(gen_path))
-            gen_data = gen_img.get_fdata(dtype=np.float32)
-            gen_tensor = torch.from_numpy(gen_data).float().unsqueeze(0).unsqueeze(0)
-        else:
-            raise ValueError(f"Unsupported file type: {gen_path.suffix}")
-        
-        if gt_tensor is None:
-            return float(compute_fid_score([str(gen_path)]) or 0.0)
-        
-        # Compute proper FID
-        return compute_fid_from_tensors(
-            pred_t2=gen_tensor,
-            gt_t2=gt_tensor,
-            device=self.device,
-            batch_size=16,
-            max_slices_per_volume=64,
-        )
-
-class SyntheticT1BatchResult(dict):
-    pass
-
-
 def zip_generated_files(file_paths: list[str], zip_path: Path) -> Path:
     zip_path.parent.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(zip_path, mode="w", compression=zipfile.ZIP_DEFLATED) as archive:

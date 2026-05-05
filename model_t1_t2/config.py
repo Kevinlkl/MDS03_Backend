@@ -73,3 +73,5 @@ class Config:
     # Inference
     # -------------------------------
     NUM_INFERENCE_STEPS = 1000
+    FID_RUNTIME_BATCH_SIZE = 16
+    FID_RUNTIME_MAX_SLICES = 64

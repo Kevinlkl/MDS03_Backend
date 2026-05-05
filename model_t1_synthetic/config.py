@@ -28,6 +28,15 @@ class Config:
     OUTPUTS_DIR = OUTPUTS_DIR
     GENERATED_DIR = GENERATED_DIR
     UPLOADS_DIR = UPLOADS_DIR
+    SYNTHETIC_PATH_DIR = BASE_DIR / "T1 Synthetic Path"
+    REAL_T1_FEATURES_PATH = SYNTHETIC_PATH_DIR / "real_t1_features.npy"
+    REAL_T1_MU_PATH = SYNTHETIC_PATH_DIR / "real_t1_mu.npy"
+    REAL_T1_SIGMA_PATH = SYNTHETIC_PATH_DIR / "real_t1_sigma.npy"
+
+    # Synthetic T1 metrics
+    SYNTHETIC_T1_FID = None
+    SYNTHETIC_T1_KID_MEAN = None
+    SYNTHETIC_T1_KID_STD = None
     # -------------------------------
     # Checkpoints
     # -------------------------------

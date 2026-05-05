@@ -28,11 +28,16 @@ def load_latent_diffusion_unet(checkpoint_path, in_channels, out_channels, devic
 
     print("Diffusion checkpoint keys:", checkpoint.keys())
 
-    if "unet_state_dict" in checkpoint:
-        model.load_state_dict(checkpoint["unet_state_dict"])
+    if "ema_unet_state_dict" in checkpoint:
+        print("Loading EMA UNet weights")
+        model.load_state_dict(checkpoint["ema_unet_state_dict"])
+
     elif "model_state_dict" in checkpoint:
+        print("Loading model_state_dict")
         model.load_state_dict(checkpoint["model_state_dict"])
+
     else:
+        print("Loading raw checkpoint")
         model.load_state_dict(checkpoint)
 
     model.eval()

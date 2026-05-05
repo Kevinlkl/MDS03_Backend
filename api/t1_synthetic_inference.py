@@ -10,6 +10,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 
 from api.preview_util import tensor_middle_slice_to_png_bytes
+from config import Config as RootConfig
 from model_t1_synthetic.config import Config
 from model_t1_synthetic.inference import SyntheticT1GenerationPipeline, zip_generated_files, compute_fid_score
 
@@ -63,7 +64,7 @@ async def generate_synthetic_t1(payload: SyntheticGenerationRequest):
         archive_path = Config.GENERATED_DIR / f"synthetic_t1_{timestamp}.zip"
         zip_generated_files([item["output_path"] for item in generated], archive_path)
 
-        return {
+        response = {
             "success": True,
             "num_samples": num_samples,
             "num_inference_steps": num_inference_steps,
@@ -82,6 +83,35 @@ async def generate_synthetic_t1(payload: SyntheticGenerationRequest):
                 for item in generated
             ],
         }
+
+        # Add analysis-compatible metadata
+        response.update({
+            "mode": "synthetic-t1",
+            "has_ground_truth": False,
+            "output_path": generated[0]["output_path"] if generated else str(archive_path),
+            "metrics": {
+                "psnr": None,
+                "ssim": None,
+                "dataset_mean_psnr": None,
+                "dataset_mean_ssim": None,
+                "dataset_fid": RootConfig.SYNTHETIC_T1_FID,
+                "dataset_kid_mean": RootConfig.SYNTHETIC_T1_KID_MEAN,
+                "dataset_kid_std": RootConfig.SYNTHETIC_T1_KID_STD,
+                "dataset_metric_scope": "Synthetic T1 batch compared against real T1 dataset"
+            },
+            "previews": {
+                "input": None,
+                "ground_truth": None,
+                "generated": response["generated_files"][0]["preview"] if response["generated_files"] else None
+            }
+        })
+
+        # Debug: print final response keys once
+        if not hasattr(generate_synthetic_t1, "_logged_keys"):
+            print("Synthetic T1 response keys:", list(response.keys()))
+            generate_synthetic_t1._logged_keys = True
+
+        return response
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Synthetic generation failed: {str(exc)}") from exc
 

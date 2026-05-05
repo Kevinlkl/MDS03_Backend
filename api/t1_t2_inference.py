@@ -111,10 +111,29 @@ async def infer_mri(
             "output_path": result["output_path"],
             "download_name": download_name,
             "has_ground_truth": gt_t2 is not None,
+            "mode": "t1-t2",
             "metrics": {
-                "psnr": round(float(metrics["psnr"]), 4) if metrics["psnr"] is not None else None,
-                "ssim": round(float(metrics["ssim"]), 4) if metrics["ssim"] is not None else None,
-                "fid": round(float(metrics["fid"]), 4) if metrics["fid"] is not None else None,
+                # Per-case metrics
+                "psnr": round(float(metrics["psnr"]), 4) if metrics.get("psnr") is not None else None,
+                "ssim": round(float(metrics["ssim"]), 4) if metrics.get("ssim") is not None else None,
+
+                # Dataset-level metrics
+                "dataset_mean_psnr": round(float(metrics["dataset_mean_psnr"]), 4)
+                if metrics.get("dataset_mean_psnr") is not None else None,
+
+                "dataset_mean_ssim": round(float(metrics["dataset_mean_ssim"]), 4)
+                if metrics.get("dataset_mean_ssim") is not None else None,
+
+                "dataset_fid": round(float(metrics["dataset_fid"]), 4)
+                if metrics.get("dataset_fid") is not None else None,
+
+                "dataset_kid_mean": round(float(metrics["dataset_kid_mean"]), 6)
+                if metrics.get("dataset_kid_mean") is not None else None,
+
+                "dataset_kid_std": round(float(metrics["dataset_kid_std"]), 6)
+                if metrics.get("dataset_kid_std") is not None else None,
+
+                "dataset_metric_scope": metrics.get("dataset_metric_scope"),
             },
             "previews": {
                 "input": t1_preview_b64,

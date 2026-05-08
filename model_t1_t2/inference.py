@@ -180,10 +180,10 @@ class InferencePipeline:
 
         # Static dataset-level metrics
         dataset_metrics = {
-            "dataset_mean_psnr": 18.2175,
-            "dataset_mean_ssim": 0.6228,
-            "dataset_fid": 99.7699,
-            "dataset_kid_mean": 0.080645,
+            "dataset_mean_psnr": 18.6299,
+            "dataset_mean_ssim": 0.6465,
+            "dataset_fid": 86.9938,
+            "dataset_kid_mean": 0.07973,
             "dataset_kid_std": 0.006863,
             "dataset_metric_scope": "Precomputed on test dataset",
         }

@@ -81,6 +81,11 @@ class Config:
     BATCH_SIZE = int(os.getenv("BATCH_SIZE", "1"))
     NUM_WORKERS = int(os.getenv("NUM_WORKERS", "0"))
 
+    # Synthetic T1 metrics (precomputed)
+    SYNTHETIC_T1_FID = None
+    SYNTHETIC_T1_KID_MEAN = None
+    SYNTHETIC_T1_KID_STD = None
+
     @classmethod
     def ensure_model_dirs_exist(cls) -> None:
         cls.MODELS_DIR.mkdir(parents=True, exist_ok=True)

@@ -11,7 +11,12 @@ from fastapi.responses import FileResponse
 
 from api.preview_util import tensor_middle_slice_to_png_bytes
 from model_t1_synthetic.config import Config
-from model_t1_synthetic.inference import SyntheticT1GenerationPipeline, zip_generated_files, compute_fid_score
+from model_t1_synthetic.inference import (
+    SyntheticT1GenerationPipeline,
+    zip_generated_files,
+    compute_batch_fid,
+    compute_batch_kid
+)
 
 router = APIRouter(prefix="/api", tags=["Synthetic T1 Generation"])
 
@@ -32,7 +37,8 @@ def get_pipeline() -> SyntheticT1GenerationPipeline:
 
 
 def tensor_to_base64_png(tensor) -> str:
-    return base64.b64encode(tensor_middle_slice_to_png_bytes(tensor).getvalue()).decode("utf-8")
+    png_buffer = tensor_middle_slice_to_png_bytes(tensor)
+    return base64.b64encode(png_buffer.getvalue()).decode("utf-8")
 
 
 @router.post("/generate_synthetic_t1")
@@ -42,10 +48,16 @@ async def generate_synthetic_t1(payload: SyntheticGenerationRequest):
     seed = payload.seed
 
     if not 1 <= num_samples <= 100:
-        raise HTTPException(status_code=400, detail="num_samples must be between 1 and 100.")
+        raise HTTPException(
+            status_code=400,
+            detail="num_samples must be between 1 and 100.",
+        )
 
     if not 1 <= num_inference_steps <= 1000:
-        raise HTTPException(status_code=400, detail="num_inference_steps must be between 1 and 1000.")
+        raise HTTPException(
+            status_code=400,
+            detail="num_inference_steps must be between 1 and 1000.",
+        )
 
     timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
     batch_dir = Config.GENERATED_DIR / f"batch_{timestamp}"
@@ -53,6 +65,7 @@ async def generate_synthetic_t1(payload: SyntheticGenerationRequest):
 
     try:
         pipeline = get_pipeline()
+
         generated = pipeline.generate_many(
             num_samples=num_samples,
             num_inference_steps=num_inference_steps,
@@ -60,37 +73,102 @@ async def generate_synthetic_t1(payload: SyntheticGenerationRequest):
             output_dir=batch_dir,
         )
 
-        archive_path = Config.GENERATED_DIR / f"synthetic_t1_{timestamp}.zip"
-        zip_generated_files([item["output_path"] for item in generated], archive_path)
+        if not generated:
+            raise RuntimeError("No synthetic T1 samples were generated.")
 
-        return {
+        archive_path = Config.GENERATED_DIR / f"synthetic_t1_{timestamp}.zip"
+
+        zip_generated_files(
+            [item["output_path"] for item in generated],
+            archive_path,
+        )
+
+        first_generated = generated[0]
+        output_path = str(first_generated["output_path"])
+
+        generated_preview = tensor_to_base64_png(first_generated["tensor"])
+
+        tensors = [item["tensor"] for item in generated]
+        computed_fid = None
+        computed_kid_mean = None
+        computed_kid_std = None
+
+        if len(tensors) >= 2:
+            computed_fid = compute_batch_fid(tensors)
+            computed_kid_mean, computed_kid_std = compute_batch_kid(tensors)
+
+        generated_files = []
+
+        for item in generated:
+            preview_base64 = tensor_to_base64_png(item["tensor"])
+
+            generated_files.append(
+                {
+                    "index": item["index"],
+                    "seed": item["seed"],
+                    "output_path": item["output_path"],
+                    "preview": preview_base64,
+                    "middle_slice_preview": preview_base64,
+                }
+            )
+
+        response = {
             "success": True,
+            "mode": "synthetic-t1",
             "num_samples": num_samples,
             "num_inference_steps": num_inference_steps,
             "seed": seed,
             "archive_path": str(archive_path),
             "download_name": archive_path.name,
-            "generated_files": [
-                {
-                    "index": item["index"],
-                    "seed": item["seed"],
-                    "output_path": item["output_path"],
-                    "preview": tensor_to_base64_png(item["tensor"]),
-                    "middle_slice_preview": tensor_to_base64_png(item["tensor"]),
-                    "fid_score": compute_fid_score(item["tensor"]),
-                }
-                for item in generated
-            ],
+            "output_path": output_path,
+            "has_ground_truth": False,
+            "metrics": {
+                "psnr": None,
+                "ssim": None,
+                "dataset_mean_psnr": None,
+                "dataset_mean_ssim": None,
+                "dataset_fid": computed_fid,
+                "dataset_kid_mean": computed_kid_mean,
+                "dataset_kid_std": computed_kid_std,
+                "dataset_metric_scope": (
+                    "Synthetic T1 batch compared against real T1 dataset"
+                ),
+            },
+            "previews": {
+                "input": None,
+                "ground_truth": None,
+                "generated": generated_preview,
+            },
+            "generated_files": generated_files,
         }
+
+        print("Synthetic T1 response keys:", list(response.keys()))
+
+        return response
+
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Synthetic generation failed: {str(exc)}") from exc
+        import traceback
+
+        traceback.print_exc()
+
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                f"Synthetic generation failed: "
+                f"{type(exc).__name__}: {str(exc)}"
+            ),
+        ) from exc
 
 
 @router.get("/download_synthetic_t1")
 async def download_synthetic_t1(path: str):
     archive_path = Path(path)
+
     if not archive_path.exists():
-        raise HTTPException(status_code=404, detail="Archive not found.")
+        raise HTTPException(
+            status_code=404,
+            detail="Archive not found.",
+        )
 
     return FileResponse(
         path=str(archive_path),

@@ -91,7 +91,9 @@ def load_classifier_weights(
 
         state_dict = checkpoint
 
-    # Fix old checkpoints saved without "model."
+    # Fix old checkpoints saved without "model." and normalize fc naming.
+    # Older classifier checkpoints may have used a Sequential wrapper for the
+    # final block, storing the linear weights under "fc.1" instead of "fc".
     new_state_dict = {}
 
     for key, value in state_dict.items():
@@ -100,6 +102,9 @@ def load_classifier_weights(
             new_key = f"model.{key}"
         else:
             new_key = key
+
+        if new_key.startswith("model.fc.1."):
+            new_key = new_key.replace("model.fc.1.", "model.fc.")
 
         new_state_dict[new_key] = value
 

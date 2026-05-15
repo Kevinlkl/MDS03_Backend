@@ -1,7 +1,7 @@
 # models/diffusion_unet.py
 import torch
 from generative.networks.nets import DiffusionModelUNet
-from generative.networks.schedulers import DDPMScheduler
+from generative.networks.schedulers import DDIMScheduler
 
 
 def build_latent_diffusion_unet(in_channels, out_channels, device="cpu"):
@@ -52,8 +52,8 @@ def load_latent_diffusion_unet(checkpoint_path, in_channels, out_channels, devic
     return model, metadata
 
 
-def build_scheduler(num_train_timesteps=1000, beta_start=0.0015, beta_end=0.0195):
-    return DDPMScheduler(
+def build_scheduler(num_train_timesteps=1000, beta_start=0.0015, beta_end=0.012):
+    return DDIMScheduler(
         num_train_timesteps=num_train_timesteps,
         schedule="scaled_linear_beta",
         beta_start=beta_start,

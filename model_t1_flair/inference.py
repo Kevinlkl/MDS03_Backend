@@ -101,17 +101,61 @@ class InferencePipeline:
         if num_inference_steps is None:
             num_inference_steps = Config.NUM_INFERENCE_STEPS
 
+        # Keep this fixed internally.
+        # Do not expose this to the demo UI.
+        guidance_scale = 4.0
+
+        z_cond = z_cond.to(self.device)
+
+        # Unconditional condition: zero T1 latent
+        z_uncond = torch.zeros_like(z_cond, device=self.device)
+
+        # Start from pure noise
         z = torch.randn_like(z_cond, device=self.device)
-        self.scheduler.set_timesteps(num_inference_steps)
+
+        self.scheduler.set_timesteps(num_inference_steps=num_inference_steps)
 
         for t in self.scheduler.timesteps:
             if not torch.is_tensor(t):
-                t_tensor = torch.tensor([t], device=self.device, dtype=torch.long)
-            else:
-                t_tensor = t.reshape(1).to(self.device).long()
+                t = torch.tensor(t, device=self.device)
 
-            model_input = torch.cat([z, z_cond], dim=1)
-            noise_pred = self.unet(model_input, timesteps=t_tensor)
+            timesteps = torch.full(
+                (z.shape[0],),
+                t,
+                device=self.device,
+                dtype=torch.long,
+            )
+
+            # -----------------------------
+            # Unconditional prediction
+            # -----------------------------
+            model_input_uncond = torch.cat([z, z_uncond], dim=1)
+            noise_pred_uncond = self.unet(
+                model_input_uncond,
+                timesteps=timesteps,
+            )
+
+            if hasattr(noise_pred_uncond, "sample"):
+                noise_pred_uncond = noise_pred_uncond.sample
+
+            # -----------------------------
+            # Conditional prediction
+            # -----------------------------
+            model_input_cond = torch.cat([z, z_cond], dim=1)
+            noise_pred_cond = self.unet(
+                model_input_cond,
+                timesteps=timesteps,
+            )
+
+            if hasattr(noise_pred_cond, "sample"):
+                noise_pred_cond = noise_pred_cond.sample
+
+            # -----------------------------
+            # Classifier-free guidance
+            # -----------------------------
+            noise_pred = noise_pred_uncond + guidance_scale * (
+                noise_pred_cond - noise_pred_uncond
+            )
 
             step_output = self.scheduler.step(noise_pred, t, z)
 
@@ -131,13 +175,17 @@ class InferencePipeline:
         num_inference_steps: Optional[int] = None,
     ) -> torch.Tensor:
         z_cond = self.encode_condition(t1)
+
         z_pred = self.reverse_diffusion(
             z_cond=z_cond,
             num_inference_steps=num_inference_steps,
         )
-        pred_flair = self.decode_latent(z_pred)
-        return pred_flair
 
+        pred_flair = self.decode_latent(z_pred)
+        pred_flair = torch.clamp(pred_flair, -1.0, 1.0)
+
+        return pred_flair
+    
     @torch.no_grad()
     def run_and_evaluate(
         self,

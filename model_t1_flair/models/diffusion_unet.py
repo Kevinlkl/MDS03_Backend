@@ -58,4 +58,5 @@ def build_scheduler(num_train_timesteps=1000, beta_start=0.0015, beta_end=0.012)
         schedule="scaled_linear_beta",
         beta_start=beta_start,
         beta_end=beta_end,
+        clip_sample=False
     )

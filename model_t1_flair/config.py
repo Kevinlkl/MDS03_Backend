@@ -36,7 +36,7 @@ class Config:
     # -------------------------------
     # Preprocessing
     # -------------------------------
-    SPATIAL_SIZE = (96, 96, 96)
+    SPATIAL_SIZE = (96, 96, 64)
     PIXDIM = (1.5, 1.5, 1.5)
 
     INTENSITY_LOWER = 0.0
@@ -61,11 +61,13 @@ class Config:
     # -------------------------------
     NUM_TRAIN_TIMESTEPS = 1000
     BETA_START = 0.0015
-    BETA_END = 0.0195
+    BETA_END = 0.012
+
 
     # -------------------------------
     # Inference
     # -------------------------------
-    NUM_INFERENCE_STEPS = 1000
+    GUIDANCE_SCALE = 4.0
+    NUM_INFERENCE_STEPS = 50
     FID_RUNTIME_BATCH_SIZE = 16
     FID_RUNTIME_MAX_SLICES = 64

@@ -52,10 +52,11 @@ class Config:
     # -------------------------------
     # Preprocessing
     # -------------------------------
-    SPATIAL_SIZE = (96, 96, 64)
-    PIXDIM = (1.5, 1.5, 1.5)
+    SPATIAL_SIZE = (128, 128, 96)
+    PIXDIM = (1.0, 1.0, 1.0)
 
-    INTENSITY_LOWER = 0.0
+    # Percentile-based intensity normalization (match notebook)
+    INTENSITY_LOWER = 0.5
     INTENSITY_UPPER = 99.5
     B_MIN = -1.0
     B_MAX = 1.0
@@ -77,14 +78,15 @@ class Config:
     # Scheduler
     # -------------------------------
     NUM_TRAIN_TIMESTEPS = 1000
-    BETA_START = 0.0015
-    BETA_END = 0.0195
+    # Beta schedule matched to notebook defaults
+    BETA_START = 0.0005
+    BETA_END = 0.012
 
     # ============================================================
     # Precomputed dataset-level evaluation metrics
     # ============================================================
 
-    PRECOMPUTED_FID = 112.5451
+    PRECOMPUTED_FID = 56.1995
 
     # Replace these with your actual KID result
     PRECOMPUTED_KID_MEAN = 0.084321

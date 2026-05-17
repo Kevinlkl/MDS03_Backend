@@ -16,3 +16,7 @@ outputs/
 # IDE
 .idea/
 .vscode/settings.json
+
+# Large data folders
+T1/
+generated/

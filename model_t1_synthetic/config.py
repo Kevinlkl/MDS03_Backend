@@ -63,14 +63,15 @@ class Config:
     # -------------------------------
     # Autoencoder settings
     # -------------------------------
-    LATENT_CHANNELS = 4
+    LATENT_CHANNELS = 8
     AUTOENCODER_CHANNELS = (32, 64, 128)
 
     # -------------------------------
     # Diffusion settings
     # -------------------------------
-    DIFFUSION_IN_CHANNELS = LATENT_CHANNELS
-    DIFFUSION_OUT_CHANNELS = LATENT_CHANNELS
+    LATENT_CHANNELS = 8
+    DIFF_NUM_CHANNELS = (128, 256, 256)
+    DIFF_NUM_HEAD_CHANNELS = (0, 64, 64)
 
     # -------------------------------
     # Scheduler
@@ -79,7 +80,17 @@ class Config:
     BETA_START = 0.0015
     BETA_END = 0.0195
 
+    # ============================================================
+    # Precomputed dataset-level evaluation metrics
+    # ============================================================
+
+    PRECOMPUTED_FID = 112.5451
+
+    # Replace these with your actual KID result
+    PRECOMPUTED_KID_MEAN = 0.084321
+    PRECOMPUTED_KID_STD = 0.006512
     # -------------------------------
     # Inference
     # -------------------------------
     NUM_INFERENCE_STEPS = 1000
+    

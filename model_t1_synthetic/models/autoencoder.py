@@ -1,7 +1,7 @@
 import torch
 
 
-def build_autoencoder(latent_channels=4, device="cpu"):
+def build_autoencoder(latent_channels=8, device="cpu"):
 	try:
 		from generative.networks.nets import AutoencoderKL
 	except ImportError as exc:

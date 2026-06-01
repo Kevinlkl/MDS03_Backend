@@ -22,6 +22,19 @@ DeviceLike = Union[str, torch.device]
 
 
 class MRIProcessor:
+    """
+    Class description:
+        Preprocessing pipeline for T1-to-T2 MRI inference inputs.
+
+    Attributes:
+        spatial_size (tuple[int, int, int]): Target spatial size after padding and cropping.
+        pixdim (tuple[float, float, float]): Target voxel spacing for resampling.
+        intensity_lower (float): Lower percentile used for intensity scaling.
+        intensity_upper (float): Upper percentile used for intensity scaling.
+        b_min (float): Minimum output intensity after scaling.
+        b_max (float): Maximum output intensity after scaling.
+    """
+
     def __init__(
         self,
         spatial_size: Tuple[int, int, int] = (96, 96, 64),
@@ -31,6 +44,21 @@ class MRIProcessor:
         b_min: float = -1.0,
         b_max: float = 1.0,
     ) -> None:
+        """
+        Function description:
+            Initialize MONAI transforms for single T1 inputs and paired T1/T2 inputs.
+
+        Parameters:
+            spatial_size (tuple[int, int, int]): Target spatial size after padding and cropping.
+            pixdim (tuple[float, float, float]): Target voxel spacing for resampling.
+            intensity_lower (float): Lower percentile used for intensity scaling.
+            intensity_upper (float): Upper percentile used for intensity scaling.
+            b_min (float): Minimum output intensity after scaling.
+            b_max (float): Maximum output intensity after scaling.
+
+        Returns:
+            None
+        """
         self.spatial_size = spatial_size
         self.pixdim = pixdim
         self.intensity_lower = intensity_lower
@@ -88,6 +116,17 @@ class MRIProcessor:
 
     @staticmethod
     def _extract_meta(output: Dict, key: str) -> Dict:
+        """
+        Function description:
+            Extract metadata for a transformed MONAI image entry.
+
+        Parameters:
+            output (dict): Transform output dictionary.
+            key (str): Image key whose metadata should be extracted.
+
+        Returns:
+            dict: Metadata dictionary for the requested image key.
+        """
         img = output[key]
         if isinstance(img, MetaTensor):
             return dict(img.meta)
@@ -98,6 +137,17 @@ class MRIProcessor:
         image_path: PathLike,
         device: DeviceLike = "cpu",
     ) -> Dict:
+        """
+        Function description:
+            Preprocess a single T1 MRI volume for inference.
+
+        Parameters:
+            image_path (str | Path): Path to the source T1 NIfTI file.
+            device (str | torch.device): Device where the batched tensor should be placed.
+
+        Returns:
+            dict: Preprocessed T1 tensor, metadata, and original path details.
+        """
         data = {"t1": str(image_path)}
         output = self.single_transforms(data)
 
@@ -117,6 +167,18 @@ class MRIProcessor:
         t2_path: PathLike,
         device: DeviceLike = "cpu",
     ) -> Dict:
+        """
+        Function description:
+            Preprocess paired T1 and T2 MRI volumes with aligned transforms.
+
+        Parameters:
+            t1_path (str | Path): Path to the source T1 NIfTI file.
+            t2_path (str | Path): Path to the ground-truth T2 NIfTI file.
+            device (str | torch.device): Device where the batched tensors should be placed.
+
+        Returns:
+            dict: Preprocessed tensors, metadata, and original path details.
+        """
         data = {
             "t1": str(t1_path),
             "t2": str(t2_path),

@@ -5,13 +5,25 @@ import torchvision.models as models
 
 class TumorClassifier(nn.Module):
     """
-    Binary Brain Tumor Classification Model
-    ---------------------------------------
-    Class 0 = No Tumor
-    Class 1 = Tumor
+    Class description:
+        Binary brain tumor classification model backed by ResNet18.
+
+    Attributes:
+        model (nn.Module): ResNet18 model with a replacement classification head.
     """
 
     def __init__(self, num_classes=2, pretrained=True):
+        """
+        Function description:
+            Initialize the ResNet18 classifier architecture.
+
+        Parameters:
+            num_classes (int): Number of output classes.
+            pretrained (bool): Whether to start from ImageNet pretrained weights.
+
+        Returns:
+            None
+        """
         super(TumorClassifier, self).__init__()
 
         # Load pretrained ResNet18
@@ -31,12 +43,29 @@ class TumorClassifier(nn.Module):
         )
 
     def forward(self, x):
+        """
+        Function description:
+            Run a forward pass through the classifier.
+
+        Parameters:
+            x (torch.Tensor): Input image batch tensor.
+
+        Returns:
+            torch.Tensor: Raw class logits.
+        """
         return self.model(x)
 
 
 def build_classifier(device=None):
     """
-    Build and return classifier model
+    Function description:
+        Build and return the classifier model.
+
+    Parameters:
+        device (torch.device | None): Optional device where the model should be placed.
+
+    Returns:
+        TumorClassifier: Classifier model on the selected device.
     """
 
     if device is None:
@@ -61,7 +90,15 @@ def load_classifier_weights(
     device=None
 ):
     """
-    Load trained classifier checkpoint
+    Function description:
+        Load a trained classifier checkpoint.
+
+    Parameters:
+        checkpoint_path (str | Path): Path to the saved checkpoint.
+        device (torch.device | None): Optional device used for loading and inference.
+
+    Returns:
+        TumorClassifier: Classifier model loaded with checkpoint weights.
     """
 
     if device is None:
@@ -119,7 +156,14 @@ def load_classifier_weights(
 
 def get_loss_function():
     """
-    Cross entropy loss for binary classification
+    Function description:
+        Create the loss function used for binary classification training.
+
+    Parameters:
+        None
+
+    Returns:
+        nn.CrossEntropyLoss: Cross-entropy loss function.
     """
 
     return nn.CrossEntropyLoss()
@@ -131,7 +175,16 @@ def get_optimizer(
     weight_decay=1e-5
 ):
     """
-    AdamW optimizer
+    Function description:
+        Create an AdamW optimizer for classifier training.
+
+    Parameters:
+        model (nn.Module): Model whose parameters should be optimized.
+        learning_rate (float): Optimizer learning rate.
+        weight_decay (float): AdamW weight decay value.
+
+    Returns:
+        torch.optim.AdamW: Optimizer configured for the model.
     """
 
     optimizer = torch.optim.AdamW(

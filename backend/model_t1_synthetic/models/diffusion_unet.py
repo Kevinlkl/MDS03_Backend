@@ -6,6 +6,18 @@ def build_latent_diffusion_unet(
     out_channels,
     device="cpu",
 ):
+    """
+    Function description:
+        Build the latent diffusion UNet for unconditional synthetic T1 generation.
+
+    Parameters:
+        in_channels (int): Number of input channels accepted by the UNet.
+        out_channels (int): Number of output channels produced by the UNet.
+        device (str | torch.device): Device where the model should be placed.
+
+    Returns:
+        DiffusionModelUNet: UNet model on the selected device.
+    """
     from generative.networks.nets import DiffusionModelUNet
 
     model = DiffusionModelUNet(
@@ -22,6 +34,17 @@ def build_latent_diffusion_unet(
     return model
 
 def load_latent_diffusion_unet(checkpoint_path, device="cpu"):
+    """
+    Function description:
+        Build the latent diffusion UNet and load saved checkpoint weights.
+
+    Parameters:
+        checkpoint_path (str | Path): Path to the saved diffusion checkpoint.
+        device (str | torch.device): Device used for loading and inference.
+
+    Returns:
+        tuple[DiffusionModelUNet, dict]: Evaluation-mode UNet and checkpoint metadata.
+    """
     checkpoint = torch.load(
         checkpoint_path,
         map_location=device,
@@ -65,6 +88,18 @@ def load_latent_diffusion_unet(checkpoint_path, device="cpu"):
     return model, metadata
 
 def build_scheduler(num_train_timesteps=1000, beta_start=0.0005, beta_end=0.012):
+	"""
+	Function description:
+		Build the DDPM scheduler used for synthetic T1 reverse diffusion.
+
+	Parameters:
+		num_train_timesteps (int): Number of training timesteps in the diffusion schedule.
+		beta_start (float): Initial beta value for the scaled-linear schedule.
+		beta_end (float): Final beta value for the scaled-linear schedule.
+
+	Returns:
+		DDPMScheduler: Configured diffusion scheduler.
+	"""
 	try:
 		from generative.networks.schedulers import DDPMScheduler
 	except ImportError as exc:

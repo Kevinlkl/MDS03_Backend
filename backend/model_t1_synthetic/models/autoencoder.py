@@ -2,6 +2,17 @@ import torch
 
 
 def build_autoencoder(latent_channels=8, device="cpu"):
+	"""
+	Function description:
+		Build the 3D AutoencoderKL architecture for synthetic T1 generation.
+
+	Parameters:
+		latent_channels (int): Number of latent channels used by the autoencoder.
+		device (str | torch.device): Device where the model should be placed.
+
+	Returns:
+		AutoencoderKL: Autoencoder model on the selected device.
+	"""
 	try:
 		from generative.networks.nets import AutoencoderKL
 	except ImportError as exc:
@@ -23,6 +34,18 @@ def build_autoencoder(latent_channels=8, device="cpu"):
 
 
 def load_autoencoder(checkpoint_path, latent_channels=4, device="cpu"):
+	"""
+	Function description:
+		Build the autoencoder and load saved checkpoint weights.
+
+	Parameters:
+		checkpoint_path (str | Path): Path to the saved autoencoder checkpoint.
+		latent_channels (int): Number of latent channels used by the autoencoder.
+		device (str | torch.device): Device used for loading and inference.
+
+	Returns:
+		AutoencoderKL: Evaluation-mode autoencoder with loaded weights.
+	"""
 	model = build_autoencoder(latent_channels=latent_channels, device=device)
 
 	checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)

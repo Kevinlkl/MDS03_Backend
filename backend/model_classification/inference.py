@@ -22,8 +22,16 @@ def predict_single_image(
     device=None
 ):
     """
-    Run inference on one image.
-    Used for frontend demo upload.
+    Function description:
+        Run classifier inference on one image or a list of representative slices.
+
+    Parameters:
+        image (Image.Image | list[Image.Image]): Image or images to classify.
+        checkpoint_path (str | Path): Classifier checkpoint path.
+        device (torch.device | None): Optional device used for inference.
+
+    Returns:
+        dict: Prediction label, confidence, and class probabilities.
     """
 
     if device is None:
@@ -98,8 +106,16 @@ def evaluate_classifier(
     device=None
 ):
     """
-    Evaluate classifier on a test dataset.
-    Used for precomputed benchmark metrics.
+    Function description:
+        Evaluate a classifier checkpoint on a test dataset.
+
+    Parameters:
+        checkpoint_path (str | Path): Classifier checkpoint path.
+        test_loader (DataLoader): DataLoader that yields test batches.
+        device (torch.device | None): Optional device used for evaluation.
+
+    Returns:
+        dict: Accuracy, precision, recall, F1, AUC, confusion matrix, and report.
     """
 
     if device is None:
@@ -188,9 +204,17 @@ def compare_two_classifiers(
     device=None
 ):
     """
-    Run one uploaded image through:
-    1. baseline classifier
-    2. synthetic-augmented classifier
+    Function description:
+        Compare baseline and synthetic-augmented classifiers on the same image input.
+
+    Parameters:
+        image (Image.Image | list[Image.Image]): Image or images to classify.
+        baseline_checkpoint_path (str | Path): Baseline classifier checkpoint path.
+        synthetic_aug_checkpoint_path (str | Path): Synthetic-augmented checkpoint path.
+        device (torch.device | None): Optional device used for inference.
+
+    Returns:
+        dict: Prediction results from both classifiers.
     """
 
     baseline_result = predict_single_image(

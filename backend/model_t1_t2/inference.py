@@ -11,10 +11,30 @@ from model_t1_t2.models.diffusion_unet import load_latent_diffusion_unet, build_
 
 
 class InferencePipeline:
-    """End-to-end T1-to-T2 inference pipeline with preprocessing and metrics."""
+    """
+    Class description:
+        End-to-end T1-to-T2 inference pipeline with preprocessing and metrics.
+
+    Attributes:
+        device (str): Torch device used for inference.
+        processor (MRIProcessor): Preprocessing pipeline for input volumes.
+        autoencoder (torch.nn.Module): Trained autoencoder used for latent encoding and decoding.
+        unet (torch.nn.Module): Trained latent diffusion denoising model.
+        scale_factor (float | torch.Tensor): Latent scaling value saved with the checkpoint.
+        scheduler (DDPMScheduler): Noise scheduler used during reverse diffusion.
+    """
 
     def __init__(self):
-        """Load preprocessing transforms, trained models, and the noise scheduler."""
+        """
+        Function description:
+            Load preprocessing transforms, trained models, and the noise scheduler.
+
+        Parameters:
+            None
+
+        Returns:
+            None
+        """
         self.device = Config.DEVICE
 
         self.processor = MRIProcessor(
@@ -53,7 +73,17 @@ class InferencePipeline:
 
     @staticmethod
     def _make_output_path(input_path: str, output_path: Optional[str]) -> Path:
-        """Resolve the output NIfTI path for a generated T2 volume."""
+        """
+        Function description:
+            Resolve the output NIfTI path for a generated T2 volume.
+
+        Parameters:
+            input_path (str): Path to the source T1 input file.
+            output_path (str | None): Optional explicit output file path.
+
+        Returns:
+            Path: Output path for the generated T2 NIfTI file.
+        """
         if output_path is not None:
             return Path(output_path)
 
@@ -65,7 +95,16 @@ class InferencePipeline:
 
     @torch.no_grad()
     def encode_condition(self, t1: torch.Tensor) -> torch.Tensor:
-        """Encode the input T1 tensor into the scaled latent conditioning space."""
+        """
+        Function description:
+            Encode the input T1 tensor into the scaled latent conditioning space.
+
+        Parameters:
+            t1 (torch.Tensor): Preprocessed T1 tensor.
+
+        Returns:
+            torch.Tensor: Scaled latent conditioning tensor.
+        """
         z_t1 = self.autoencoder.encode_stage_2_inputs(t1)
 
         # Checkpoints may store the latent scale as a Python float or tensor.
@@ -82,7 +121,16 @@ class InferencePipeline:
 
     @torch.no_grad()
     def decode_latent(self, z: torch.Tensor) -> torch.Tensor:
-        """Decode a predicted latent tensor back into image space."""
+        """
+        Function description:
+            Decode a predicted latent tensor back into image space.
+
+        Parameters:
+            z (torch.Tensor): Predicted latent tensor.
+
+        Returns:
+            torch.Tensor: Decoded T2 image tensor.
+        """
         if isinstance(self.scale_factor, torch.Tensor):
             scale_factor = self.scale_factor.to(z.device, dtype=z.dtype)
         else:
@@ -102,7 +150,17 @@ class InferencePipeline:
         z_cond: torch.Tensor,
         num_inference_steps: Optional[int] = None,
     ) -> torch.Tensor:
-        """Denoise random latent noise while conditioning on the encoded T1 volume."""
+        """
+        Function description:
+            Denoise random latent noise while conditioning on the encoded T1 volume.
+
+        Parameters:
+            z_cond (torch.Tensor): Encoded T1 latent conditioning tensor.
+            num_inference_steps (int | None): Optional number of denoising steps.
+
+        Returns:
+            torch.Tensor: Predicted latent tensor for the T2 output.
+        """
         if num_inference_steps is None:
             num_inference_steps = Config.NUM_INFERENCE_STEPS
 
@@ -135,7 +193,17 @@ class InferencePipeline:
         t1: torch.Tensor,
         num_inference_steps: Optional[int] = None,
     ) -> torch.Tensor:
-        """Run model inference for a preprocessed T1 tensor."""
+        """
+        Function description:
+            Run model inference for a preprocessed T1 tensor.
+
+        Parameters:
+            t1 (torch.Tensor): Preprocessed T1 tensor.
+            num_inference_steps (int | None): Optional number of denoising steps.
+
+        Returns:
+            torch.Tensor: Generated T2 tensor.
+        """
         z_cond = self.encode_condition(t1)
         z_pred = self.reverse_diffusion(
             z_cond=z_cond,
@@ -152,7 +220,19 @@ class InferencePipeline:
         output_path: Optional[str] = None,
         num_inference_steps: Optional[int] = None,
     ) -> dict:
-        """Preprocess input files, generate T2 output, and attach metrics."""
+        """
+        Function description:
+            Preprocess input files, generate T2 output, and attach metrics.
+
+        Parameters:
+            input_path (str): Path to the source T1 NIfTI file.
+            gt_path (str | None): Optional path to a ground-truth T2 NIfTI file.
+            output_path (str | None): Optional output path for the generated NIfTI file.
+            num_inference_steps (int | None): Optional number of denoising steps.
+
+        Returns:
+            dict: Generated tensors, output path, metrics, and preprocessing details.
+        """
         if gt_path is not None:
             # Pair preprocessing keeps input and ground-truth transforms aligned.
             item = self.processor.preprocess_pair(

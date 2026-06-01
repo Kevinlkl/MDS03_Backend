@@ -1,3 +1,9 @@
+"""FastAPI routes for unconditional synthetic T1 MRI generation.
+
+The route creates one or more synthetic T1 volumes, saves them as NIfTI files,
+packages the batch into a ZIP archive, and returns preview images for the UI.
+"""
+
 from __future__ import annotations
 
 from datetime import datetime
@@ -18,19 +24,41 @@ from model_t1_synthetic.inference import (
 
 router = APIRouter(prefix="/api", tags=["Synthetic T1 Generation"])
 
+# Cached pipeline instance. Keeping it lazy prevents missing checkpoints from
+# stopping unrelated API routes at startup.
 _pipeline: Optional[SyntheticT1GenerationPipeline] = None
 
 
 class SyntheticGenerationRequest(BaseModel):
-    """Request body for synthetic T1 batch generation."""
+    """
+    Class description:
+        Request body for synthetic T1 batch generation.
 
+    Attributes:
+        num_samples (int): Number of NIfTI volumes to generate.
+        num_inference_steps (int): Number of reverse-diffusion steps per sample.
+        seed (int | None): Optional seed for reproducible generation.
+    """
+
+    # Number of NIfTI volumes to generate in this batch.
     num_samples: int = 1
+    # Number of reverse-diffusion steps to run per generated sample.
     num_inference_steps: int = Config.NUM_INFERENCE_STEPS
+    # Optional seed makes generation reproducible for debugging/demo purposes.
     seed: Optional[int] = None
 
 
 def get_pipeline() -> SyntheticT1GenerationPipeline:
-    """Create and cache the synthetic T1 generation pipeline on first use."""
+    """
+    Function description:
+        Create and cache the synthetic T1 generation pipeline on first use.
+
+    Parameters:
+        None
+
+    Returns:
+        SyntheticT1GenerationPipeline: Cached synthetic T1 generation pipeline instance.
+    """
     global _pipeline
     if _pipeline is None:
         # Defer checkpoint loading until this endpoint is called.
@@ -39,14 +67,32 @@ def get_pipeline() -> SyntheticT1GenerationPipeline:
 
 
 def tensor_to_base64_png(tensor) -> str:
-    """Convert the middle slice of a tensor volume into a base64 PNG string."""
+    """
+    Function description:
+        Convert the middle slice of a tensor volume into a base64 PNG string.
+
+    Parameters:
+        tensor (torch.Tensor): Tensor volume to preview.
+
+    Returns:
+        str: Base64-encoded PNG payload.
+    """
     png_buffer = tensor_middle_slice_to_png_bytes(tensor)
     return base64.b64encode(png_buffer.getvalue()).decode("utf-8")
 
 
 @router.post("/generate_synthetic_t1")
 async def generate_synthetic_t1(payload: SyntheticGenerationRequest):
-    """Generate one or more synthetic T1 MRI volumes and return previews."""
+    """
+    Function description:
+        Generate one or more synthetic T1 MRI volumes and return previews.
+
+    Parameters:
+        payload (SyntheticGenerationRequest): Generation count, step count, and optional seed.
+
+    Returns:
+        dict: Batch metadata, metrics, archive path, and base64 previews.
+    """
     num_samples = payload.num_samples
     num_inference_steps = payload.num_inference_steps
     seed = payload.seed
@@ -66,6 +112,7 @@ async def generate_synthetic_t1(payload: SyntheticGenerationRequest):
 
     timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
     batch_dir = Config.GENERATED_DIR / f"batch_{timestamp}"
+    # Each request gets its own output directory to avoid filename collisions.
     batch_dir.mkdir(parents=True, exist_ok=True)
 
     try:
@@ -93,11 +140,13 @@ async def generate_synthetic_t1(payload: SyntheticGenerationRequest):
         first_generated = generated[0]
         output_path = str(first_generated["output_path"])
 
+        # The top-level preview mirrors the first generated sample for quick display.
         generated_preview = tensor_to_base64_png(first_generated["tensor"])
 
         generated_files = []
 
         for item in generated:
+            # Include a per-sample preview so multi-sample batches can be browsed.
             preview_base64 = tensor_to_base64_png(item["tensor"])
 
             generated_files.append(
@@ -145,6 +194,7 @@ async def generate_synthetic_t1(payload: SyntheticGenerationRequest):
         return response
 
     except Exception as exc:
+        # Keep a server-side traceback for debugging while returning a clean API error.
         import traceback
 
         traceback.print_exc()
@@ -160,7 +210,16 @@ async def generate_synthetic_t1(payload: SyntheticGenerationRequest):
 
 @router.get("/download_synthetic_t1")
 async def download_synthetic_t1(path: str):
-    """Download a ZIP archive created by the synthetic T1 generation endpoint."""
+    """
+    Function description:
+        Download a ZIP archive created by the synthetic T1 generation endpoint.
+
+    Parameters:
+        path (str): Filesystem path to the generated ZIP archive.
+
+    Returns:
+        FileResponse: Download response for the ZIP archive.
+    """
     archive_path = Path(path)
 
     if not archive_path.exists():

@@ -1,3 +1,10 @@
+"""FastAPI routes for T1-to-FLAIR MRI synthesis.
+
+The route accepts an uploaded T1 NIfTI file, optionally accepts a ground-truth
+FLAIR file for per-case metrics, runs the diffusion pipeline lazily, and returns
+download metadata plus base64 previews for the frontend.
+"""
+
 from pathlib import Path
 import tempfile
 import shutil
@@ -12,11 +19,22 @@ from model_t1_flair.inference import InferencePipeline
 
 router = APIRouter(prefix="/api", tags=["T1 to FLAIR Inference"])
 
+# Cached pipeline instance. It starts as None so checkpoints are not loaded
+# during module import or FastAPI startup.
 pipeline: Optional[InferencePipeline] = None
 
 
 def get_pipeline() -> InferencePipeline:
-    """Create and cache the T1-to-FLAIR inference pipeline on first use."""
+    """
+    Function description:
+        Create and cache the T1-to-FLAIR inference pipeline on first use.
+
+    Parameters:
+        None
+
+    Returns:
+        InferencePipeline: Cached T1-to-FLAIR inference pipeline instance.
+    """
     global pipeline
     if pipeline is None:
         # Loading checkpoints here would crash app startup if files are missing.
@@ -25,7 +43,16 @@ def get_pipeline() -> InferencePipeline:
 
 
 def cleanup_files(*paths):
-    """Delete temporary files created during request processing."""
+    """
+    Function description:
+        Delete temporary files created during request processing.
+
+    Parameters:
+        *paths (str | Path): File paths to remove when they exist.
+
+    Returns:
+        None
+    """
     for p in paths:
         try:
             path = Path(p)
@@ -35,7 +62,16 @@ def cleanup_files(*paths):
             pass
 
 def png_buffer_to_base64(png_buffer) -> str:
-    """Convert an in-memory PNG buffer into a base64 string for JSON output."""
+    """
+    Function description:
+        Convert an in-memory PNG buffer into a base64 string for JSON output.
+
+    Parameters:
+        png_buffer (BytesIO): In-memory PNG image buffer.
+
+    Returns:
+        str: Base64-encoded PNG payload.
+    """
     return base64.b64encode(png_buffer.getvalue()).decode("utf-8")
 
 @router.post("/infer_t1_flair")
@@ -44,7 +80,18 @@ async def infer_mri(
     ground_truth_file: Optional[UploadFile] = File(None),
     num_inference_steps: int = Form(1000),
 ):
-    """Generate a synthetic FLAIR MRI volume from an uploaded T1 MRI file."""
+    """
+    Function description:
+        Generate a synthetic FLAIR MRI volume from an uploaded T1 MRI file.
+
+    Parameters:
+        file (UploadFile): Uploaded source T1 .nii or .nii.gz MRI volume.
+        ground_truth_file (UploadFile | None): Optional ground-truth FLAIR volume.
+        num_inference_steps (int): Number of reverse-diffusion steps to run.
+
+    Returns:
+        dict: Download metadata, metrics, and base64 previews for the generated output.
+    """
     input_filename = file.filename or ""
     gt_filename = (ground_truth_file.filename or "") if ground_truth_file else ""
 
@@ -80,12 +127,14 @@ async def infer_mri(
             input_path = tmp_input.name
 
         if ground_truth_file is not None:
+            # Ground truth is optional; when provided it is transformed with T1.
             gt_suffix = ".nii.gz" if gt_filename.endswith(".nii.gz") else ".nii"
             with tempfile.NamedTemporaryFile(delete=False, suffix=gt_suffix) as tmp_gt:
                 shutil.copyfileobj(ground_truth_file.file, tmp_gt)
                 gt_path = tmp_gt.name
 
         with tempfile.NamedTemporaryFile(delete=False, suffix=".nii.gz") as tmp_output:
+            # The pipeline writes the generated NIfTI to this path.
             output_path = tmp_output.name
 
         # Instantiate the model only when this endpoint is actually called.
@@ -117,12 +166,14 @@ async def infer_mri(
         )
 
         if input_filename.endswith(".nii.gz"):
+            # Path.stem only removes ".gz", so strip the full compound suffix.
             base_name = input_filename[:-7]
         else:
             base_name = Path(input_filename).stem
 
         download_name = f"{base_name}_pred_flair_{num_inference_steps}steps.nii.gz"
 
+        # Keep response fields aligned with the frontend's shared inference result shape.
         return {
             "success": True,
             "output_path": result["output_path"],
@@ -160,6 +211,7 @@ async def infer_mri(
         }
 
     except Exception as e:
+        # Surface model/preprocessing failures as API errors instead of raw tracebacks.
         raise HTTPException(status_code=500, detail=f"Inference failed: {str(e)}")
 
     finally:
@@ -170,7 +222,16 @@ async def infer_mri(
 
 @router.get("/download_t1_flair")
 async def download_t1_flair(path: str):
-    """Download a generated FLAIR NIfTI file from a previously returned path."""
+    """
+    Function description:
+        Download a generated FLAIR NIfTI file from a previously returned path.
+
+    Parameters:
+        path (str): Filesystem path returned by the inference endpoint.
+
+    Returns:
+        FileResponse: Download response for the generated NIfTI file.
+    """
     p = Path(path)
     if not p.exists():
         raise HTTPException(status_code=404, detail="Output file not found.")

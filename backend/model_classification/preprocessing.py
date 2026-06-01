@@ -58,6 +58,15 @@ val_test_transforms = transforms.Compose([
 # ==========================================
 
 class BrainTumorDataset(Dataset):
+    """
+    Class description:
+        Dataset wrapper for brain tumor classification images.
+
+    Attributes:
+        image_paths (list[str | Path]): Image file paths used by the dataset.
+        labels (list[int] | None): Optional labels aligned with image paths.
+        transform (Callable | None): Optional image transform applied before return.
+    """
 
     def __init__(
         self,
@@ -65,16 +74,48 @@ class BrainTumorDataset(Dataset):
         labels=None,
         transform=None
     ):
+        """
+        Function description:
+            Initialize the dataset with image paths, labels, and an optional transform.
+
+        Parameters:
+            image_paths (list[str | Path]): Image file paths used by the dataset.
+            labels (list[int] | None): Optional labels aligned with image paths.
+            transform (Callable | None): Optional image transform applied before return.
+
+        Returns:
+            None
+        """
 
         self.image_paths = image_paths
         self.labels = labels
         self.transform = transform
 
     def __len__(self):
+        """
+        Function description:
+            Return the number of images in the dataset.
+
+        Parameters:
+            None
+
+        Returns:
+            int: Number of image paths.
+        """
 
         return len(self.image_paths)
 
     def __getitem__(self, idx):
+        """
+        Function description:
+            Load and transform one dataset item.
+
+        Parameters:
+            idx (int): Dataset index to load.
+
+        Returns:
+            torch.Tensor | tuple[torch.Tensor, int]: Image tensor with optional label.
+        """
 
         image_path = self.image_paths[idx]
 
@@ -104,14 +145,15 @@ def preprocess_single_image(
     transform=val_test_transforms
 ):
     """
-    Preprocess single image for inference
+    Function description:
+        Preprocess a single image for classifier inference.
 
-    Input:
-        PIL image or numpy array
+    Parameters:
+        image (Image.Image | np.ndarray): Input image to preprocess.
+        transform (Callable): Torchvision transform applied to the image.
 
-    Output:
-        Tensor shape:
-        [1, 3, 224, 224]
+    Returns:
+        torch.Tensor: Batched image tensor with shape [1, 3, 224, 224].
     """
 
     # Convert numpy -> PIL

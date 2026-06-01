@@ -17,6 +17,18 @@ GT_DIR.mkdir(parents=True, exist_ok=True)
 
 
 class Config:
+    """
+    Class description:
+        Central configuration values for the T1-to-FLAIR generation pipeline.
+
+    Attributes:
+        DEVICE (str): Torch device selected for model execution.
+        CHECKPOINTS_DIR (Path): Directory containing model checkpoints.
+        OUTPUTS_DIR (Path): Directory where generated outputs are written.
+        SPATIAL_SIZE (tuple[int, int, int]): Target preprocessing spatial size.
+        NUM_INFERENCE_STEPS (int): Default number of reverse-diffusion steps.
+    """
+
     # -------------------------------
     # Device
     # -------------------------------

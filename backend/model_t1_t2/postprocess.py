@@ -26,11 +26,31 @@ _FID_STATS_CACHE: dict[str, np.ndarray] = {}
 
 
 def _is_nifti_file(path: Path) -> bool:
+    """
+    Function description:
+        Check whether a path points to a supported NIfTI file.
+
+    Parameters:
+        path (Path): File path to inspect.
+
+    Returns:
+        bool: True when the path ends with .nii or .nii.gz.
+    """
     name = path.name.lower()
     return name.endswith(".nii") or name.endswith(".nii.gz")
 
 
 def _normalize_volume(volume: np.ndarray) -> np.ndarray:
+    """
+    Function description:
+        Normalize a volume into a stable [0, 1] range using robust percentiles.
+
+    Parameters:
+        volume (np.ndarray): Input image volume.
+
+    Returns:
+        np.ndarray: Normalized float32 volume.
+    """
     volume = np.nan_to_num(
         volume.astype(np.float32),
         nan=0.0,
@@ -57,6 +77,17 @@ def _iter_nifti_slices(
     path: Path,
     max_slices_per_volume: Optional[int] = None,
 ) -> Iterator[torch.Tensor]:
+    """
+    Function description:
+        Yield normalized 2D slice tensors from a NIfTI volume.
+
+    Parameters:
+        path (Path): Path to the NIfTI file.
+        max_slices_per_volume (int | None): Optional maximum number of slices to sample.
+
+    Returns:
+        Iterator[torch.Tensor]: Iterator of single-channel slice tensors.
+    """
     volume = nib.load(str(path)).get_fdata(dtype=np.float32)
 
     if volume.ndim == 4:
@@ -88,6 +119,16 @@ def _iter_nifti_slices(
 
 
 def _iter_image_slices(path: Path) -> Iterator[torch.Tensor]:
+    """
+    Function description:
+        Yield a normalized grayscale tensor slice from a 2D image file.
+
+    Parameters:
+        path (Path): Path to the image file.
+
+    Returns:
+        Iterator[torch.Tensor]: Iterator containing one single-channel image tensor.
+    """
     with Image.open(path) as img:
         gray = img.convert("L")
         arr = np.asarray(gray, dtype=np.float32)
@@ -107,6 +148,17 @@ def _iter_input_slices(
     input_path: Path,
     max_slices_per_volume: Optional[int] = None,
 ) -> Iterator[torch.Tensor]:
+    """
+    Function description:
+        Yield normalized slice tensors from a file or directory of supported inputs.
+
+    Parameters:
+        input_path (Path): Input file or directory path.
+        max_slices_per_volume (int | None): Optional maximum number of slices per NIfTI volume.
+
+    Returns:
+        Iterator[torch.Tensor]: Iterator of single-channel slice tensors.
+    """
     if input_path.is_file():
         if _is_nifti_file(input_path):
             yield from _iter_nifti_slices(
@@ -138,6 +190,16 @@ def _iter_input_slices(
 
 
 def _resolve_fid_device(device: Optional[str] = None) -> torch.device:
+    """
+    Function description:
+        Resolve the best available torch device for FID feature extraction.
+
+    Parameters:
+        device (str | None): Optional requested device string.
+
+    Returns:
+        torch.device: Available device selected for FID computation.
+    """
     mps_available = (
         hasattr(torch.backends, "mps")
         and torch.backends.mps.is_available()
@@ -170,6 +232,16 @@ def _resolve_fid_device(device: Optional[str] = None) -> torch.device:
 
 
 def _build_inception_feature_extractor(device: torch.device) -> torch.nn.Module:
+    """
+    Function description:
+        Build or reuse an InceptionV3 feature extractor for FID computation.
+
+    Parameters:
+        device (torch.device): Device where the model should run.
+
+    Returns:
+        torch.nn.Module: Cached InceptionV3 model with identity classification head.
+    """
     cache_key = str(device)
 
     cached = _INCEPTION_MODEL_CACHE.get(cache_key)
@@ -205,6 +277,16 @@ def _build_inception_feature_extractor(device: torch.device) -> torch.nn.Module:
 
 
 def _normalize_inception_output(output: object) -> torch.Tensor:
+    """
+    Function description:
+        Normalize torchvision Inception output variants into a tensor.
+
+    Parameters:
+        output (object): Output returned by the Inception model.
+
+    Returns:
+        torch.Tensor: Feature tensor extracted from the model output.
+    """
     if isinstance(output, tuple):
         return output[0]
 
@@ -222,6 +304,17 @@ def _iter_batch_volume_slices(
     batch_np: np.ndarray,
     max_slices_per_volume: Optional[int] = None,
 ) -> Iterator[torch.Tensor]:
+    """
+    Function description:
+        Yield normalized 2D slice tensors from a generated batch volume array.
+
+    Parameters:
+        batch_np (np.ndarray): 4D or 5D batch array containing generated volumes.
+        max_slices_per_volume (int | None): Optional maximum number of slices per volume.
+
+    Returns:
+        Iterator[torch.Tensor]: Iterator of single-channel slice tensors.
+    """
     if batch_np.ndim == 5:
         volumes = batch_np[:, 0]
     elif batch_np.ndim == 4:
@@ -266,6 +359,19 @@ def _extract_features_from_slice_iterator(
     device: torch.device,
     batch_size: int,
 ) -> np.ndarray:
+    """
+    Function description:
+        Extract Inception features from an iterator of 2D slice tensors.
+
+    Parameters:
+        slice_iterator (Iterator[torch.Tensor]): Iterator of single-channel slice tensors.
+        model (torch.nn.Module): Inception feature extractor.
+        device (torch.device): Device where inference should run.
+        batch_size (int): Number of slices to process per batch.
+
+    Returns:
+        np.ndarray: Matrix of extracted feature vectors.
+    """
     features: list[np.ndarray] = []
     batch: list[torch.Tensor] = []
 
@@ -273,6 +379,16 @@ def _extract_features_from_slice_iterator(
     std = IMAGENET_STD.to(device)
 
     def flush_batch() -> None:
+        """
+        Function description:
+            Process the currently buffered slice tensors and append extracted features.
+
+        Parameters:
+            None
+
+        Returns:
+            None
+        """
         nonlocal batch
 
         if not batch:
@@ -315,6 +431,16 @@ def _extract_features_from_slice_iterator(
 
 
 def _compute_gaussian_stats(features: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Function description:
+        Compute Gaussian mean and covariance statistics for feature vectors.
+
+    Parameters:
+        features (np.ndarray): Matrix of feature vectors.
+
+    Returns:
+        tuple[np.ndarray, np.ndarray]: Mean vector and covariance matrix.
+    """
     if features.ndim != 2:
         raise ValueError(f"Expected 2D feature matrix, got shape {features.shape}")
 
@@ -328,6 +454,16 @@ def _compute_gaussian_stats(features: np.ndarray) -> tuple[np.ndarray, np.ndarra
 
 
 def _matrix_sqrt_psd(matrix: np.ndarray) -> np.ndarray:
+    """
+    Function description:
+        Compute the matrix square root for a positive semi-definite matrix.
+
+    Parameters:
+        matrix (np.ndarray): Symmetric matrix to decompose.
+
+    Returns:
+        np.ndarray: Matrix square root.
+    """
     matrix = (matrix + matrix.T) / 2.0
 
     eigvals, eigvecs = np.linalg.eigh(matrix)
@@ -345,6 +481,20 @@ def _calculate_frechet_distance(
     sigma2: np.ndarray,
     eps: float = 1e-6,
 ) -> float:
+    """
+    Function description:
+        Calculate Frechet distance between two Gaussian feature distributions.
+
+    Parameters:
+        mu1 (np.ndarray): Mean vector for the first distribution.
+        sigma1 (np.ndarray): Covariance matrix for the first distribution.
+        mu2 (np.ndarray): Mean vector for the second distribution.
+        sigma2 (np.ndarray): Covariance matrix for the second distribution.
+        eps (float): Stabilizing diagonal offset.
+
+    Returns:
+        float: Non-negative Frechet distance value.
+    """
     mu1 = np.atleast_1d(mu1)
     mu2 = np.atleast_1d(mu2)
     sigma1 = np.atleast_2d(sigma1)
@@ -375,6 +525,16 @@ def _calculate_frechet_distance(
 
 
 def _load_fid_stats_cached(path: str) -> np.ndarray:
+    """
+    Function description:
+        Load cached FID statistics from disk and reuse them by path and modification time.
+
+    Parameters:
+        path (str): Path to a NumPy statistics file.
+
+    Returns:
+        np.ndarray: Loaded statistics array.
+    """
     abs_path = os.path.abspath(path)
     mtime = os.path.getmtime(abs_path)
     cache_key = f"{abs_path}:{mtime}"
@@ -390,6 +550,16 @@ def _load_fid_stats_cached(path: str) -> np.ndarray:
 
 
 def tensor_to_numpy(pred: torch.Tensor) -> np.ndarray:
+    """
+    Function description:
+        Convert a generated tensor volume into a NumPy array.
+
+    Parameters:
+        pred (torch.Tensor): Generated tensor with optional batch/channel dimensions.
+
+    Returns:
+        np.ndarray: Volume array without leading batch/channel dimensions.
+    """
     pred = pred.detach().cpu()
 
     if pred.ndim == 5:
@@ -405,6 +575,18 @@ def save_nifti(
     output_path: str,
     affine: Optional[np.ndarray] = None,
 ) -> str:
+    """
+    Function description:
+        Save a generated tensor volume as a NIfTI file.
+
+    Parameters:
+        pred (torch.Tensor): Generated tensor volume.
+        output_path (str): Destination NIfTI path.
+        affine (np.ndarray | None): Optional affine matrix for the NIfTI image.
+
+    Returns:
+        str: Destination path where the NIfTI file was saved.
+    """
     arr = tensor_to_numpy(pred)
 
     if affine is None:
@@ -420,6 +602,17 @@ def compute_psnr_ssim(
     pred_np: np.ndarray,
     gt_np: np.ndarray,
 ) -> tuple[float, float]:
+    """
+    Function description:
+        Compute mean PSNR and SSIM between predicted and ground-truth batches.
+
+    Parameters:
+        pred_np (np.ndarray): Predicted batch array in model output range.
+        gt_np (np.ndarray): Ground-truth batch array in model output range.
+
+    Returns:
+        tuple[float, float]: Mean PSNR and SSIM values.
+    """
     psnr_list = []
     ssim_list = []
 
@@ -457,6 +650,17 @@ def evaluate_batch(
     pred_t2: torch.Tensor,
     gt_t2: Optional[torch.Tensor] = None,
 ) -> dict[str, Optional[float]]:
+    """
+    Function description:
+        Evaluate generated T2 tensors against an optional ground-truth tensor.
+
+    Parameters:
+        pred_t2 (torch.Tensor): Generated T2 tensor.
+        gt_t2 (torch.Tensor | None): Optional ground-truth T2 tensor.
+
+    Returns:
+        dict[str, float | None]: PSNR and SSIM metrics when ground truth is available.
+    """
 
     pred_np = pred_t2.detach().cpu().numpy()
 

@@ -18,6 +18,18 @@ UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
 
 
 class Config:
+    """
+    Class description:
+        Central configuration values for unconditional synthetic T1 generation.
+
+    Attributes:
+        DEVICE (str): Torch device selected for model execution.
+        CHECKPOINTS_DIR (Path): Directory containing model checkpoints and metric files.
+        GENERATED_DIR (Path): Directory where generated samples and archives are written.
+        SPATIAL_SIZE (tuple[int, int, int]): Target generated volume spatial size.
+        NUM_INFERENCE_STEPS (int): Default number of reverse-diffusion steps.
+    """
+
     # -------------------------------
     # Device
     # -------------------------------

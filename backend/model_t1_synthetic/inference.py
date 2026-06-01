@@ -23,6 +23,18 @@ def save_nifti_volume(
     output_path: str,
     affine: Optional[np.ndarray] = None,
 ) -> str:
+    """
+    Function description:
+        Save a generated synthetic T1 tensor volume as a NIfTI file.
+
+    Parameters:
+        volume (torch.Tensor): Generated tensor volume.
+        output_path (str): Destination NIfTI path.
+        affine (np.ndarray | None): Optional affine matrix for the NIfTI image.
+
+    Returns:
+        str: Destination path where the NIfTI file was saved.
+    """
     arr = volume.detach().cpu().float().numpy()
 
     while arr.ndim > 3:
@@ -41,6 +53,16 @@ def save_nifti_volume(
 
 
 def get_precomputed_dataset_metrics() -> dict[str, Any]:
+    """
+    Function description:
+        Return precomputed dataset-level metrics for synthetic T1 generation.
+
+    Parameters:
+        None
+
+    Returns:
+        dict[str, Any]: FID, KID, and metric note values.
+    """
     return {
         "dataset_fid": float(Config.PRECOMPUTED_FID),
         "dataset_kid_mean": float(Config.PRECOMPUTED_KID_MEAN),
@@ -50,7 +72,31 @@ def get_precomputed_dataset_metrics() -> dict[str, Any]:
 
 
 class SyntheticT1GenerationPipeline:
+    """
+    Class description:
+        End-to-end unconditional synthetic T1 generation pipeline.
+
+    Attributes:
+        device (str): Torch device used for generation.
+        autoencoder (torch.nn.Module): Trained autoencoder used to decode generated latents.
+        unet (torch.nn.Module): Trained latent diffusion denoising model.
+        scale_factor (float): Latent scaling value saved with the checkpoint.
+        latent_channels (int): Number of channels in the latent representation.
+        scheduler (DDPMScheduler): Noise scheduler used during reverse diffusion.
+        latent_spatial_shape (tuple[int, ...]): Spatial shape used for latent noise sampling.
+    """
+
     def __init__(self) -> None:
+        """
+        Function description:
+            Load trained synthetic T1 models, scheduler, and latent shape settings.
+
+        Parameters:
+            None
+
+        Returns:
+            None
+        """
         self.device = Config.DEVICE
 
         self.autoencoder = load_autoencoder(
@@ -92,6 +138,16 @@ class SyntheticT1GenerationPipeline:
         self.latent_spatial_shape = self._infer_latent_spatial_shape()
 
     def _infer_latent_spatial_shape(self) -> tuple[int, ...]:
+        """
+        Function description:
+            Infer the latent spatial shape expected by the autoencoder.
+
+        Parameters:
+            None
+
+        Returns:
+            tuple[int, ...]: Latent spatial shape used when sampling noise.
+        """
         dummy = torch.zeros(
             (1, 1, *Config.SPATIAL_SIZE),
             device=self.device,
@@ -111,6 +167,17 @@ class SyntheticT1GenerationPipeline:
         index: int,
         output_dir: Optional[Path] = None,
     ) -> Path:
+        """
+        Function description:
+            Resolve the destination path for one generated synthetic T1 volume.
+
+        Parameters:
+            index (int): One-based generated sample index.
+            output_dir (Path | None): Optional output directory override.
+
+        Returns:
+            Path: Destination path for the generated NIfTI file.
+        """
         base_dir = Path(output_dir) if output_dir is not None else Config.GENERATED_DIR
         base_dir.mkdir(parents=True, exist_ok=True)
 
@@ -122,6 +189,17 @@ class SyntheticT1GenerationPipeline:
         num_inference_steps: Optional[int] = None,
         seed: Optional[int] = None,
     ) -> torch.Tensor:
+        """
+        Function description:
+            Generate one synthetic T1 tensor by denoising sampled latent noise.
+
+        Parameters:
+            num_inference_steps (int | None): Optional number of denoising steps.
+            seed (int | None): Optional seed for deterministic noise sampling.
+
+        Returns:
+            torch.Tensor: Generated synthetic T1 tensor.
+        """
         steps = int(num_inference_steps or Config.NUM_INFERENCE_STEPS)
 
         generator = None
@@ -184,6 +262,19 @@ class SyntheticT1GenerationPipeline:
         seed: Optional[int] = None,
         output_dir: Optional[Path] = None,
     ) -> list[dict[str, Any]]:
+        """
+        Function description:
+            Generate multiple synthetic T1 volumes and save each one to disk.
+
+        Parameters:
+            num_samples (int): Number of synthetic T1 volumes to generate.
+            num_inference_steps (int | None): Optional number of denoising steps per sample.
+            seed (int | None): Optional base seed incremented for each sample.
+            output_dir (Path | None): Optional directory where files should be saved.
+
+        Returns:
+            list[dict[str, Any]]: Generated sample metadata, tensors, paths, and metrics.
+        """
         if num_samples < 1:
             raise ValueError("num_samples must be at least 1")
 
@@ -221,6 +312,14 @@ class SyntheticT1GenerationPipeline:
 
 
 class SyntheticT1BatchResult(dict):
+    """
+    Class description:
+        Dictionary-like container reserved for synthetic T1 batch results.
+
+    Attributes:
+        None
+    """
+
     pass
 
 
@@ -228,6 +327,17 @@ def zip_generated_files(
     file_paths: list[str],
     zip_path: Path,
 ) -> Path:
+    """
+    Function description:
+        Package generated NIfTI files into a ZIP archive.
+
+    Parameters:
+        file_paths (list[str]): Paths to generated files that should be archived.
+        zip_path (Path): Destination ZIP archive path.
+
+    Returns:
+        Path: Path to the created ZIP archive.
+    """
     zip_path.parent.mkdir(parents=True, exist_ok=True)
 
     with zipfile.ZipFile(

@@ -9,10 +9,6 @@ Dataset/
 outputs/
 *.safetensors
 
-# Environment configuration
-.env
-.env.local
-
 # IDE
 .idea/
 .vscode/settings.json

@@ -115,6 +115,7 @@ def pil_images_to_base64(pil_images):
 async def run_classification(
     file: UploadFile = File(...)
 ):
+    """Classify an uploaded MRI volume using baseline and synthetic-augmented models."""
 
     # Validate extension
     if not (

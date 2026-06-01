@@ -11,7 +11,10 @@ from model_t1_t2.models.diffusion_unet import load_latent_diffusion_unet, build_
 
 
 class InferencePipeline:
+    """End-to-end T1-to-T2 inference pipeline with preprocessing and metrics."""
+
     def __init__(self):
+        """Load preprocessing transforms, trained models, and the noise scheduler."""
         self.device = Config.DEVICE
 
         self.processor = MRIProcessor(
@@ -50,6 +53,7 @@ class InferencePipeline:
 
     @staticmethod
     def _make_output_path(input_path: str, output_path: Optional[str]) -> Path:
+        """Resolve the output NIfTI path for a generated T2 volume."""
         if output_path is not None:
             return Path(output_path)
 
@@ -61,8 +65,10 @@ class InferencePipeline:
 
     @torch.no_grad()
     def encode_condition(self, t1: torch.Tensor) -> torch.Tensor:
+        """Encode the input T1 tensor into the scaled latent conditioning space."""
         z_t1 = self.autoencoder.encode_stage_2_inputs(t1)
 
+        # Checkpoints may store the latent scale as a Python float or tensor.
         if isinstance(self.scale_factor, torch.Tensor):
             scale_factor = self.scale_factor.to(z_t1.device, dtype=z_t1.dtype)
         else:
@@ -76,6 +82,7 @@ class InferencePipeline:
 
     @torch.no_grad()
     def decode_latent(self, z: torch.Tensor) -> torch.Tensor:
+        """Decode a predicted latent tensor back into image space."""
         if isinstance(self.scale_factor, torch.Tensor):
             scale_factor = self.scale_factor.to(z.device, dtype=z.dtype)
         else:
@@ -95,6 +102,7 @@ class InferencePipeline:
         z_cond: torch.Tensor,
         num_inference_steps: Optional[int] = None,
     ) -> torch.Tensor:
+        """Denoise random latent noise while conditioning on the encoded T1 volume."""
         if num_inference_steps is None:
             num_inference_steps = Config.NUM_INFERENCE_STEPS
 
@@ -127,6 +135,7 @@ class InferencePipeline:
         t1: torch.Tensor,
         num_inference_steps: Optional[int] = None,
     ) -> torch.Tensor:
+        """Run model inference for a preprocessed T1 tensor."""
         z_cond = self.encode_condition(t1)
         z_pred = self.reverse_diffusion(
             z_cond=z_cond,
@@ -143,17 +152,9 @@ class InferencePipeline:
         output_path: Optional[str] = None,
         num_inference_steps: Optional[int] = None,
     ) -> dict:
-        """
-        If gt_path is provided:
-            - preprocess T1 and GT together
-            - run inference
-            - compute PSNR/SSIM
-        If gt_path is not provided:
-            - preprocess T1 only
-            - run inference
-            - skip metrics
-        """
+        """Preprocess input files, generate T2 output, and attach metrics."""
         if gt_path is not None:
+            # Pair preprocessing keeps input and ground-truth transforms aligned.
             item = self.processor.preprocess_pair(
                 t1_path=input_path,
                 t2_path=gt_path,
@@ -178,7 +179,7 @@ class InferencePipeline:
         output_path_obj.parent.mkdir(parents=True, exist_ok=True)
         save_nifti(pred_t2, str(output_path_obj))
 
-        # Static dataset-level metrics
+        # Static dataset-level metrics are shown alongside optional per-case metrics.
         dataset_metrics = {
             "dataset_mean_psnr": 18.6299,
             "dataset_mean_ssim": 0.6465,

@@ -22,29 +22,36 @@ _pipeline: Optional[SyntheticT1GenerationPipeline] = None
 
 
 class SyntheticGenerationRequest(BaseModel):
+    """Request body for synthetic T1 batch generation."""
+
     num_samples: int = 1
     num_inference_steps: int = Config.NUM_INFERENCE_STEPS
     seed: Optional[int] = None
 
 
 def get_pipeline() -> SyntheticT1GenerationPipeline:
+    """Create and cache the synthetic T1 generation pipeline on first use."""
     global _pipeline
     if _pipeline is None:
+        # Defer checkpoint loading until this endpoint is called.
         _pipeline = SyntheticT1GenerationPipeline()
     return _pipeline
 
 
 def tensor_to_base64_png(tensor) -> str:
+    """Convert the middle slice of a tensor volume into a base64 PNG string."""
     png_buffer = tensor_middle_slice_to_png_bytes(tensor)
     return base64.b64encode(png_buffer.getvalue()).decode("utf-8")
 
 
 @router.post("/generate_synthetic_t1")
 async def generate_synthetic_t1(payload: SyntheticGenerationRequest):
+    """Generate one or more synthetic T1 MRI volumes and return previews."""
     num_samples = payload.num_samples
     num_inference_steps = payload.num_inference_steps
     seed = payload.seed
 
+    # Keep request bounds small enough for an interactive API call.
     if not 1 <= num_samples <= 100:
         raise HTTPException(
             status_code=400,
@@ -62,6 +69,7 @@ async def generate_synthetic_t1(payload: SyntheticGenerationRequest):
     batch_dir.mkdir(parents=True, exist_ok=True)
 
     try:
+        # Pipeline construction loads checkpoints lazily.
         pipeline = get_pipeline()
 
         generated = pipeline.generate_many(
@@ -76,6 +84,7 @@ async def generate_synthetic_t1(payload: SyntheticGenerationRequest):
 
         archive_path = Config.GENERATED_DIR / f"synthetic_t1_{timestamp}.zip"
 
+        # Package all generated NIfTI files into one downloadable archive.
         zip_generated_files(
             [item["output_path"] for item in generated],
             archive_path,
@@ -151,6 +160,7 @@ async def generate_synthetic_t1(payload: SyntheticGenerationRequest):
 
 @router.get("/download_synthetic_t1")
 async def download_synthetic_t1(path: str):
+    """Download a ZIP archive created by the synthetic T1 generation endpoint."""
     archive_path = Path(path)
 
     if not archive_path.exists():

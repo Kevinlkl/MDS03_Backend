@@ -31,4 +31,5 @@ app.include_router(classification_router)
 
 @app.get("/api/hello")
 def read_root():
+    """Return a simple health-check response for the backend."""
     return {"message": "Hello from Python backend"}

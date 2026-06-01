@@ -17,13 +17,16 @@ pipeline: Optional[InferencePipeline] = None
 
 
 def get_pipeline() -> InferencePipeline:
+    """Create and cache the T1-to-T2 inference pipeline on first use."""
     global pipeline
     if pipeline is None:
+        # Loading checkpoints here would crash app startup if files are missing.
         pipeline = InferencePipeline()
     return pipeline
 
 
 def cleanup_files(*paths):
+    """Delete temporary files created during request processing."""
     for p in paths:
         try:
             path = Path(p)
@@ -33,6 +36,7 @@ def cleanup_files(*paths):
             pass
 
 def png_buffer_to_base64(png_buffer) -> str:
+    """Convert an in-memory PNG buffer into a base64 string for JSON output."""
     return base64.b64encode(png_buffer.getvalue()).decode("utf-8")
 
 @router.post("/infer_t1_t2")
@@ -41,9 +45,11 @@ async def infer_mri(
     ground_truth_file: Optional[UploadFile] = File(None),
     num_inference_steps: int = Form(1000),
 ):
+    """Generate a synthetic T2 MRI volume from an uploaded T1 MRI file."""
     input_filename = file.filename or ""
     gt_filename = (ground_truth_file.filename or "") if ground_truth_file else ""
 
+    # Validate input before writing upload contents to disk.
     if not input_filename.endswith((".nii", ".nii.gz")):
         raise HTTPException(
             status_code=400,
@@ -67,6 +73,7 @@ async def infer_mri(
     output_path = None
 
     try:
+        # FastAPI upload files are streamed into temporary NIfTI files for MONAI.
         input_suffix = ".nii.gz" if input_filename.endswith(".nii.gz") else ".nii"
 
         with tempfile.NamedTemporaryFile(delete=False, suffix=input_suffix) as tmp_input:
@@ -82,6 +89,7 @@ async def infer_mri(
         with tempfile.NamedTemporaryFile(delete=False, suffix=".nii.gz") as tmp_output:
             output_path = tmp_output.name
 
+        # Instantiate the model only when this endpoint is actually called.
         active_pipeline = get_pipeline()
 
         result = active_pipeline.run_and_evaluate(
@@ -96,6 +104,7 @@ async def infer_mri(
         gt_t2 = result["gt_t2"]
         metrics = result["metrics"]
 
+        # Encode middle-slice previews so the frontend can render quick output.
         t1_preview_b64 = png_buffer_to_base64(
             tensor_middle_slice_to_png_bytes(t1)
         )
@@ -162,6 +171,7 @@ async def infer_mri(
 
 @router.get("/download_t1_t2")
 async def download_t1_t2(path: str):
+    """Download a generated T2 NIfTI file from a previously returned path."""
     p = Path(path)
     if not p.exists():
         raise HTTPException(status_code=404, detail="Output file not found.")

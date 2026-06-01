@@ -54,6 +54,7 @@ Please ensure all required checkpoint files are uploaded correctly before starti
 # Training Notebook Overview
 
 The `training_notebook/` folder contains notebooks used during experimentation, training, evaluation, and dataset preparation.
+These training notebooks are to be run in Google Colab specifically as they are not configured to run directly on VSCode.
 
 | Notebook | Purpose |
 |---|---|

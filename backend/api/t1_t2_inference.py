@@ -13,7 +13,14 @@ from model_t1_t2.inference import InferencePipeline
 
 router = APIRouter(prefix="/api", tags=["T1 to T2 Inference"])
 
-pipeline = InferencePipeline()
+pipeline: Optional[InferencePipeline] = None
+
+
+def get_pipeline() -> InferencePipeline:
+    global pipeline
+    if pipeline is None:
+        pipeline = InferencePipeline()
+    return pipeline
 
 
 def cleanup_files(*paths):
@@ -75,7 +82,9 @@ async def infer_mri(
         with tempfile.NamedTemporaryFile(delete=False, suffix=".nii.gz") as tmp_output:
             output_path = tmp_output.name
 
-        result = pipeline.run_and_evaluate(
+        active_pipeline = get_pipeline()
+
+        result = active_pipeline.run_and_evaluate(
             input_path=input_path,
             gt_path=gt_path,
             output_path=output_path,
